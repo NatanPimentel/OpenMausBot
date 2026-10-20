@@ -153,6 +153,11 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
 export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
+  if (name === "routine_no_update") {
+    const { ok, body } = await apiResponse("/api/internal/routine-no-update", { method: "POST", body: JSON.stringify({}) });
+    return ok ? { text: "Recorded: this run has nothing new. End your turn now, without text." }
+      : { text: String(body.error ?? "routine_no_update was refused."), isError: true };
+  }
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
       method: "POST",

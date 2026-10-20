@@ -3780,3 +3780,41 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.started).toEqual([]);
   });
 });
+
+describe("a run with nothing new", () => {
+  const event = (threadId: string, fields: Record<string, unknown>) =>
+    ({ eventId: `event-${Math.random()}`, provider: "fake", threadId, createdAt: new Date(0).toISOString(), ...fields }) as Parameters<RoutineManager["handleRuntimeEvent"]>[0];
+  const started = async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Queue", prompt: "Drain the queue", botId: "maus-1", enabled: false,
+      schedule: { type: "interval", everyMinutes: 20, anchorAt: h.options.now!() + 3_600_000 } });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const threadId = h.manager.listRuns().find((candidate) => candidate.id === run.id)!.threadId!;
+    return { h, run, threadId };
+  };
+
+  it("is stamped once it completes, and keeps the stamp after a restart", async () => {
+    const { h, run, threadId } = await started();
+    expect(h.manager.markNoUpdate(run.id)).toBe(true);
+    expect(h.manager.handleRuntimeEvent(event(threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed", noUpdate: true });
+    expect(new RoutineManager(h.options).listRuns().find((candidate) => candidate.id === run.id)?.noUpdate).toBe(true);
+    expect(h.manager.markNoUpdate(run.id)).toBe(false);
+  });
+
+  it("is never stamped when the run answered, failed, or then asked the person", async () => {
+    const plain = await started();
+    expect(plain.h.manager.handleRuntimeEvent(event(plain.threadId, { type: "turn.completed", ok: true }))?.noUpdate).toBeUndefined();
+
+    const failed = await started();
+    failed.h.manager.markNoUpdate(failed.run.id);
+    expect(failed.h.manager.handleRuntimeEvent(event(failed.threadId, { type: "turn.completed", ok: false }))?.noUpdate).toBeUndefined();
+
+    const asked = await started();
+    asked.h.manager.markNoUpdate(asked.run.id);
+    asked.h.manager.handleRuntimeEvent(event(asked.threadId, { type: "request.opened", requestType: "question", tool: "ask", summary: "Which account?" }));
+    asked.h.manager.handleRuntimeEvent(event(asked.threadId, { type: "request.resolved", behavior: "answer", source: "user" }));
+    expect(asked.h.manager.handleRuntimeEvent(event(asked.threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed" });
+    expect(asked.h.manager.listRuns()[0]!.noUpdate).toBeUndefined();
+  });
+});

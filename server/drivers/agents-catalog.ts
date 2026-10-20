@@ -280,6 +280,11 @@ const TOOL_DEFINITIONS = [
     }, required: ["reason"] },
   },
   {
+    name: "routine_no_update",
+    description: "Routine or webhook runs only: call when this run found nothing the person needs to see, then end your turn without text. The run keeps its receipt but marks nothing unread and sends no notification. Failures, questions and approvals still reach the person.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
     name: "list_bots",
     description:
       "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",

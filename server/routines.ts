@@ -132,6 +132,8 @@ export interface RoutineRun {
   denials?: string[];
   createdAt: number;
   seenAt?: number;
+  /** The run said it had nothing to report and then completed: its receipt stays, with no unread mark or completion notice. */
+  noUpdate?: true;
 }
 
 export interface RoutineRequestReceipt {
@@ -429,6 +431,7 @@ export class RoutineManager {
   private closing = false;
   private ownerNotices: RoutineOwnerNotice[] = [];
   private readonly failureFacts = new Map<string, RoutineFailureFacts>();
+  private readonly noUpdateRuns = new Set<string>();
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
   private frozenPending = false;
@@ -663,6 +666,14 @@ export class RoutineManager {
     return this.runs.some(
       (run) => run.threadId === threadId && ["running", "waiting"].includes(run.status),
     );
+  }
+
+  /** Applies only if the run's current turn then completes it; a failure or a wait for the person still reports. */
+  markNoUpdate(runId: string): boolean {
+    const run = this.runs.find((candidate) => candidate.id === runId && candidate.status === "running");
+    if (!run) return false;
+    this.noUpdateRuns.add(run.id);
+    return true;
   }
 
   runForThread(threadId: string): RoutineRun | null {
@@ -1321,6 +1332,7 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "request.opened") {
+      this.noUpdateRuns.delete(run.id);
       run.asked ??= askOf(event, this.now());
       this.wait(run, waitingFor(run.asked));
     } else if (event.type === "request.resolved") {
@@ -1338,6 +1350,7 @@ export class RoutineManager {
       this.failureFacts.set(run.id, engineFacts(event));
     } else if (event.type === "turn.completed") {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
+      const noUpdate = this.noUpdateRuns.delete(run.id);
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
@@ -1348,6 +1361,7 @@ export class RoutineManager {
       if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
       else {
         Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        if (noUpdate) run.noUpdate = true;
         this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
       }
       run.error = undefined;

@@ -7339,8 +7339,11 @@ bus.subscribe((event: RuntimeEvent) => {
         settlingTurns.add(event.threadId);
         liveTurnByThread.delete(event.threadId);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
-        if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
-        if ((!routineRun || routineRun.status === "completed") && !internal && !computerSelectionTurns.get(event.threadId)?.selected) {
+        const routineNoUpdate = routineRun?.noUpdate === true;
+        if (routineNoUpdate) {
+          if (routineRun?.triggerSource === "webhook" && !routineReportThread) store.patchTask(bot.id, event.threadId, { unread: false, archivedAt: Date.now() });
+        } else if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
+        if ((!routineRun || routineRun.status === "completed") && !internal && !routineNoUpdate && !computerSelectionTurns.get(event.threadId)?.selected) {
           const completionDetail = routineRun
             ? reply || routineRun.output || routineRun.routineName
             : reply;
@@ -9289,7 +9292,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     if (execution?.routineRunId === run.id) {
       store.patchTask(run.botId, execution.threadId, {
         routineRunId: undefined,
-        ...(["waiting", "completed", "failed", "missed"].includes(run.status) ? { unread: true } : {}),
+        ...(["waiting", "completed", "failed", "missed"].includes(run.status) && !run.noUpdate ? { unread: true } : {}),
       });
     }
     return null;
@@ -9330,7 +9333,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     }
   }
 
-  if (statusChanged && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
+  if (statusChanged && !run.noUpdate && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
     if (source.group) store.patchGroup(source.group.id, { unread: true });
     else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
   }
@@ -14174,6 +14177,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      if (path === "/api/internal/routine-no-update") {
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        const body = await readInternalBody();
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+          return json(res, 400, { error: "routine_no_update takes no arguments" });
+        }
+        const run = activeRoutineRunForThread(internalCapability.threadId);
+        if (!run || run.botId !== internalSender.id) return json(res, 403, { error: "routine_no_update only applies inside a routine or webhook run of your own; answer normally here" });
+        requireActiveInternalCapability();
+        if (!routines?.markNoUpdate(run.id)) return json(res, 409, { error: "this routine run is no longer running" });
+        return json(res, 200, { ok: true });
+      }
       if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);

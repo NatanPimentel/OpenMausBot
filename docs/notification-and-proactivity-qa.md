@@ -16,6 +16,11 @@ notifications disabled remains quiet. Otherwise it may emit:
 - **Finished** only when there is a non-empty result to summarize.
 - **Routine failed** when a scheduled or manual routine run cannot complete.
 
+A routine or webhook run that calls `routine_no_update` and then completes
+emits nothing and marks nothing unread. Its receipt stays on the reporting
+conversation, and a webhook run's own conversation is filed as read and
+archived. A failure, question or approval in that run reports as usual.
+
 Every notification carries both the bot ID and the exact task thread ID. A
 click must select that bot **and switch to that task**, including a routine's
 detached task; opening whichever task happens to be active is a failure.
@@ -35,6 +40,7 @@ alone cannot provide closed-app delivery.
 | Store navigation selects the bot and switches the task | `src/state/store.test.ts` |
 | Routine failure receipt and callback occur once | `server/routines.test.ts` |
 | Real failed routine emits one `routine-failed` notification and no duplicate `done` | `server/notification-wiring.test.ts` |
+| A run with nothing new leaves no unread mark or notification; a run with news still does | `server/routine-no-update.e2e.test.ts` |
 | iOS target parsing and detached-task decision | `ios/Tests/CompanionCoreTests/DecodingTests.swift` |
 | Paired-device route policy remains default-deny | `companion/test/routes.test.ts` |
 
