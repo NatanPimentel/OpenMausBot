@@ -1381,6 +1381,7 @@ export class RoutineManager {
 
   private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts) {
     this.failureFacts.delete(run.id);
+    this.noUpdateRuns.delete(run.id);
     if (this.closing) return;
     const backupReady = facts.limitResetsAt !== undefined && this.options.limitBackup?.(run.botId) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);

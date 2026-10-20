@@ -3817,4 +3817,17 @@ describe("a run with nothing new", () => {
     expect(asked.h.manager.handleRuntimeEvent(event(asked.threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed" });
     expect(asked.h.manager.listRuns()[0]!.noUpdate).toBeUndefined();
   });
+
+  it("is forgotten when the run fails and starts again", async () => {
+    const { h, run, threadId } = await started();
+    h.manager.markNoUpdate(run.id);
+    h.manager.failThread(threadId, "the turn stalled", { stalled: true });
+    expect(h.manager.listRuns()[0]).toMatchObject({ id: run.id, status: "queued" });
+    h.setNow(h.options.now!() + 3_600_000);
+    await h.manager.tick();
+    const again = h.manager.listRuns()[0]!;
+    expect(again).toMatchObject({ id: run.id, status: "running" });
+    expect(h.manager.handleRuntimeEvent(event(again.threadId!, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed" });
+    expect(h.manager.listRuns()[0]!.noUpdate).toBeUndefined();
+  });
 });
