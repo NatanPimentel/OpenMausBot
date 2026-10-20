@@ -268,7 +268,7 @@ describe("Chat MCP session", () => {
 
   it.each([
     ["repeated cursor", `reply(message, {tools:[],nextCursor:"same"});`],
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:513},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["duplicate tool", `reply(message, {tools:[{name:"same",inputSchema:schema},{name:"same",inputSchema:schema}]});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
     ["oversized incomplete frame", `process.stdout.write("x".repeat(2*1024*1024+1));`],
@@ -588,6 +588,146 @@ describe("Chat MCP tool directory", () => {
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
       expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
     } finally { await remote.close(); }
+  });
+});
+
+describe("Chat MCP shared tool budget", () => {
+  /** A stdio fake listing `count` tools; every tools/call echoes its target and lands in the receipt. */
+  function toolServer(count: number, prefix: string) {
+    const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-budget-"));
+    dirs.push(dir);
+    const script = join(dir, "fake-mcp.mjs");
+    const receipt = join(dir, "receipt.json");
+    const tools = Array.from({ length: count }, (_, index) => ({
+      name: `${prefix}_${index}`,
+      description: `Fixture ${prefix} tool number ${index} handles action${index}`,
+      inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false },
+    }));
+    writeFileSync(script, `#!/usr/bin/env node
+      import { writeFileSync } from "node:fs";
+      const receipt = process.env.RECEIPT;
+      const tools = ${JSON.stringify(tools)};
+      const calls = [];
+      const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+      const reply = (message, result) => send({jsonrpc:"2.0",id:message.id,result});
+      let buffer = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        let newline;
+        while ((newline = buffer.indexOf("\\n")) !== -1) {
+          const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+          const message = JSON.parse(line);
+          calls.push(message);
+          writeFileSync(receipt, JSON.stringify({pid:process.pid,calls}));
+          if (message.method === "initialize") reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}});
+          else if (message.method === "tools/list") reply(message, {tools});
+          else if (message.method === "tools/call") reply(message, {content:[{type:"text",text:"ran " + message.params.name + ":" + (message.params.arguments?.value ?? "")}]});
+        }
+      });
+    `);
+    chmodSync(script, 0o755);
+    const controller = new AbortController();
+    controllers.push(controller);
+    return {
+      receipt, controller,
+      server: { command: script, args: [], env: { RECEIPT: receipt } } as { command: string; args: string[]; env: Record<string, string> },
+      read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
+    };
+  }
+
+  it("admits a custom server through its tool directory when its own list cannot fit the shared budget", async () => {
+    const bulk = toolServer(120, "bulk");
+    const browse = toolServer(25, "browse");
+    const session = await mountChatTools({ custom: { bulk: bulk.server, browse: browse.server } }, bulk.controller.signal);
+    sessions.push(session);
+    expect(session.skipped).toEqual([]);
+    expect(session.definitions).toHaveLength(123);
+    expect(session.definitions.slice(-3).map((tool) => tool.function.name)).toEqual(["browse_search_tools", "browse_describe_tool", "browse_call_tool"]);
+    const search = await session.execute("browse_search_tools", { query: "action3", limit: 8 }, bulk.controller.signal);
+    expect(JSON.parse(search.text).matches.map((match: { name: string }) => match.name)).toEqual(["browse_3"]);
+    const described = await session.execute("browse_describe_tool", { name: "browse_3" }, bulk.controller.signal);
+    expect(JSON.parse(described.text).name).toBe("browse_3");
+    // Directory reads are answered from the already-fetched catalog: no tools/call reaches the server.
+    expect(browse.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+    const args = { name: "browse_3", arguments: { value: "on" } };
+    expect(session.view("browse_call_tool", args)).toEqual({ title: "browse_browse_3", input: { value: "on" }, ask: true, grant: grantFor("browse", "browse_3") });
+    expect(session.view("browse_search_tools", { query: "x" })).toEqual({ title: "browse_search_tools", input: { query: "x" }, ask: false });
+    await expect(session.execute("browse_call_tool", args, bulk.controller.signal)).resolves.toMatchObject({ ok: true, text: "ran browse_3:on" });
+    expect(browse.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params)).toEqual([{ name: "browse_3", arguments: { value: "on" } }]);
+    const nameless = await session.execute("browse_call_tool", { arguments: {} }, bulk.controller.signal);
+    expect(nameless).toMatchObject({ ok: true, text: expect.stringContaining("search_tools") });
+    const misfit = await session.execute("browse_call_tool", { name: "browse_3", arguments: { first: "ten" } }, bulk.controller.signal);
+    expect(JSON.parse(misfit.text).problems).toContain("must have required property 'value'");
+    expect(browse.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+  });
+
+  it("still drops a server whole when even its three directory operations exceed the remaining budget", async () => {
+    const bulk = toolServer(126, "bulk");
+    const over = toolServer(25, "over");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const session = await mountChatTools({ custom: { bulk: bulk.server, over: over.server } }, bulk.controller.signal);
+      sessions.push(session);
+      expect(session.definitions).toHaveLength(126);
+      expect(session.skipped).toEqual([{ server: "over", reason: expect.stringContaining("128-tool limit") }]);
+      expect(session.skipped[0]!.reason).toContain("126");
+      expect(session.skipped[0]!.reason).toContain("25");
+      expect(alive(over.read().pid)).toBe(false);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("keeps the tool selection inside a budget-admitted directory", async () => {
+    const bulk = toolServer(110, "bulk");
+    const over = toolServer(25, "over");
+    const scope: ToolScope = { allow: ["mcp:bulk:*", "mcp:over:*"], deny: ["mcp:over:over_24"] };
+    const session = await mountChatTools({ custom: { bulk: bulk.server, over: over.server } }, bulk.controller.signal, false, scope);
+    sessions.push(session);
+    expect(session.skipped).toEqual([]);
+    expect(session.definitions).toHaveLength(113);
+    expect(() => session.validate("over_call_tool", { name: "over_24", arguments: { value: "x" } })).toThrow("Tool selection excludes this tool");
+    await expect(session.execute("over_call_tool", { name: "over_24", arguments: { value: "x" } }, bulk.controller.signal)).rejects.toThrow("Tool selection excludes this tool");
+    const found = JSON.parse((await session.execute("over_search_tools", { query: "action24", limit: 20 }, bulk.controller.signal)).text).matches;
+    expect(found).toEqual([]);
+    await expect(session.execute("over_call_tool", { name: "over_3", arguments: { value: "x" } }, bulk.controller.signal)).resolves.toMatchObject({ ok: true, text: "ran over_3:x" });
+    expect(over.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params)).toEqual([{ name: "over_3", arguments: { value: "x" } }]);
+  });
+
+  it("reduces a remote server's listed tools to its directory under the same budget pressure", async () => {
+    const bulk = toolServer(105, "bulk");
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(30) });
+    try {
+      const session = await mountChatTools({ custom: { bulk: bulk.server, whop: { type: "http", url: remote.url, headers: {} } } }, bulk.controller.signal);
+      sessions.push(session);
+      expect(session.skipped).toEqual([]);
+      expect(session.definitions).toHaveLength(108);
+      expect(session.definitions.slice(-3).map((tool) => tool.function.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+      await expect(session.execute("whop_call_tool", { name: "payments_list", arguments: { company_id: "biz_1" } }, bulk.controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+      expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+    } finally { await remote.close(); }
+  });
+
+  it("mounts a custom server as a directory when its catalog alone exceeds the exposure bound", async () => {
+    const huge = toolServer(140, "huge");
+    const session = await mountChatTools({ custom: { huge: huge.server } }, huge.controller.signal);
+    sessions.push(session);
+    expect(session.skipped).toEqual([]);
+    expect(session.definitions.map((tool) => tool.function.name)).toEqual(["huge_search_tools", "huge_describe_tool", "huge_call_tool"]);
+    const found = JSON.parse((await session.execute("huge_search_tools", { query: "action139", limit: 8 }, huge.controller.signal)).text).matches;
+    expect(found.map((match: { name: string }) => match.name)).toEqual(["huge_139"]);
+    await expect(session.execute("huge_call_tool", { name: "huge_139", arguments: { value: "x" } }, huge.controller.signal)).resolves.toMatchObject({ ok: true, text: "ran huge_139:x" });
+  });
+
+  it("still skips a server whose catalog outgrows the bounded catalog read", async () => {
+    const flood = toolServer(4 * 128 + 1, "flood");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const session = await mountChatTools({ custom: { flood: flood.server } }, flood.controller.signal);
+      sessions.push(session);
+      expect(session.definitions).toEqual([]);
+      expect(session.skipped).toEqual([{ server: "flood", reason: "MCP tool count exceeds the 512-tool limit" }]);
+      expect(alive(flood.read().pid)).toBe(false);
+    } finally { warn.mockRestore(); }
   });
 });
 
