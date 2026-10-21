@@ -1,0 +1,49 @@
+catalog-goldens {'exit': 0, 'seconds': 7.2}
+catalog ok ['delete_table', 'execute_data', 'list_tables', 'query_data', 'routine_no_update'] 50
+focused-tests {'exit': 0, 'seconds': 436.94}
+server-typecheck-build {'exit': 0, 'seconds': 31.03}
+server-bundle {'exit': 0, 'seconds': 1.56}
+packaged-server-smoke {'exit': 0, 'seconds': 21.07}
+ui-build {'exit': -6, 'seconds': 65.17}
+vite v7.3.6 building client environment for production...
+transforming...
+Found 2 warnings while optimizing generated CSS:
+
+Issue #1:
+[2m│   border-radius: 4px;[22m
+[2m│ }[22m
+[2m│[22m ::highlight(search-result-text) {
+[2m┆[22m             [33m[2m^--[22m 'highlight' is not recognized as a valid pseudo-element. Did you mean ':highlight' (pseudo-class) or is this a typo?[39m
+[2m┆[22m
+[2m│   color: var(--color-ink);[22m
+[2m│   background-color: color-mix(in srgb, #1084fe 35%, transparent);[22m
+
+Issue #2:
+[2m│   }[22m
+[2m│ }[22m
+[2m│[22m ::highlight(omb-citation-source) {
+[2m┆[22m             [33m[2m^--[22m 'highlight' is not recognized as a valid pseudo-element. Did you mean ':highlight' (pseudo-class) or is this a typo?[39m
+[2m┆[22m
+[2m│   background-color: color-mix(in srgb, #1084fe 35%, transparent);[22m
+[2m│   @supports (color: color-mix(in lab, red, red)) {[22m
+
+✓ 5392 modules transformed.
+
+<--- Last few GCs --->
+
+[633767:0x24d98000]    62496 ms: Mark-Compact (reduce) 1773.8 (1802.1) -> 1773.8 (1802.1) MB, pooled: 0.0 MB, 917.15 / 0.00 ms (average mu = 0.106, current mu = 0.000) last resort; GC in old space requested
+[633767:0x24d98000]    63494 ms: Mark-Compact (reduce) 1773.8 (1802.1) -> 1773.8 (1801.1) MB, pooled: 0.0 MB, 997.84 / 0.00 ms (average mu = 0.053, current mu = 0.000) last resort; GC in old space requested
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x82153b node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 2: 0xc771eb  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 3: 0xee8135  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 4: 0xee633c  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 5: 0xee6b49  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 6: 0xed927c  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 7: 0xed8b8f  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 8: 0xeb4d1d  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+ 9: 0x1373391  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]
+10: 0x1a89a76  [/home/natan/.local/share/ecosystem-runtime/node-v26.7.0-linux-x64/bin/node]

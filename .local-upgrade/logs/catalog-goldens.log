@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /home/natan/orca/workspaces/OpenMausBot/preservar-mods-0120
+
+
+ Test Files  2 passed (2)
+      Tests  69 passed (69)
+   Start at  02:00:23
+   Duration  6.71s (transform 499ms, setup 986ms, import 247ms, tests 5.04s, environment 0ms)
+
