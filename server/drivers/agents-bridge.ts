@@ -46,6 +46,7 @@ export const BRIDGE_HOT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "fill_login",
   "send_voice_note",
   "memory_update",
+  "routine_no_update",
 ]);
 
 /** Matches per search; each carries its full input schema. */
