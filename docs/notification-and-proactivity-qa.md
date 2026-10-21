@@ -16,7 +16,7 @@ notifications disabled remains quiet. Otherwise it may emit:
 - **Finished** only when there is a non-empty result to summarize.
 - **Routine failed** when a scheduled or manual routine run cannot complete.
 
-A routine or webhook run that calls `routine_no_update` and then completes
+A routine or webhook run that calls `routine_no_update` and completes without result text
 emits nothing and marks nothing unread. Its receipt stays on the reporting
 conversation, and a webhook run's own conversation is filed as read and
 archived. A failure, question or approval in that run reports as usual.

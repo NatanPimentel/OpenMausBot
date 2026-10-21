@@ -3831,6 +3831,16 @@ describe("a run with nothing new", () => {
     expect(blank.h.manager.handleRuntimeEvent(event(blank.threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed", noUpdate: true });
   });
 
+  it.each([false, true])("keeps result text before a no-update call, including a repeated call: %s", async markedBefore => {
+    const { h, run, threadId } = await started();
+    if (markedBefore) h.manager.markNoUpdate(run.id);
+    h.manager.handleRuntimeEvent(event(threadId, { type: "item.completed", itemType: "assistant_text", text: "Drained 3 jobs" }));
+    h.manager.markNoUpdate(run.id);
+    const completed = h.manager.handleRuntimeEvent(event(threadId, { type: "turn.completed", ok: true }));
+    expect(completed).toMatchObject({ status: "completed", output: "Drained 3 jobs" });
+    expect(completed?.noUpdate).toBeUndefined();
+  });
+
   it("is forgotten when the run fails and starts again", async () => {
     const { h, run, threadId } = await started();
     h.manager.markNoUpdate(run.id);

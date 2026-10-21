@@ -1362,7 +1362,7 @@ export class RoutineManager {
       if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
       else {
         Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
-        if (noUpdate) run.noUpdate = true;
+        if (noUpdate && !run.output) run.noUpdate = true;
         this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
       }
       run.error = undefined;
