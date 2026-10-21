@@ -5,3 +5,4 @@
 - 21/10/2026 02:00 BRT: 1ª rodada: 26 falhas em agents-bridge(.test/-wire) — goldens bridged/orçamento novos da 120 + ranking BM25 (delete_table). Corrigido (goldens regenerados, BUDGET_BASELINE +432, teste de ranking isola upstream). Rerodando tudo.
 - 21/10/2026 02:10 BRT: servidor verde (35 arquivos/615 testes, typecheck, bundle, smoke). Build UI estourou 1800MB; refazendo com 4096MB só para vite.
 - 21/10/2026 02:11 BRT: UI ok (4096MB), patch reproduzível e README gerados; abrindo PR no fork.
+- 21/10/2026 02:16 BRT: PR aberto no fork; pronto.
