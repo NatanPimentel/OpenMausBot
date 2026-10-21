@@ -1,0 +1,10 @@
+{
+  "added_tools": [
+    "delete_table",
+    "execute_data",
+    "list_tables",
+    "query_data",
+    "routine_no_update"
+  ],
+  "upstream_tools_preserved": 50
+}

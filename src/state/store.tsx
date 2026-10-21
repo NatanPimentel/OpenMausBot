@@ -3301,6 +3301,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         frame.kind === "webhook.deleted"
       ) {
         bumpPeripheralVersion("webhooks");
+      } else if (frame.kind === "notifications.read") {
+        bumpPeripheralVersion("notifications");
       }
       switch (frame.kind) {
         case "sections":
@@ -3373,6 +3375,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             visibleNotificationThread(stateRef.current),
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
+          break;
+        case "notifications.read":
+          for (const id of frame.ids) rawDispatch({ type: "notificationRead", id });
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

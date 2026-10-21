@@ -35,6 +35,7 @@ const ENTRY_POINTS = [
   "openmausbot.ts",
   "pair-cli.ts",
   "workspace-backup.worker.ts",
+  "openbot-data/child.ts",
   // the OMB Cloud Pro home image's entry point
   "cloud-home-start.ts",
   // the container image's entry point

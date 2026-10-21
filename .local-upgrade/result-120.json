@@ -1,0 +1,62 @@
+{
+  "version": "0.1.120",
+  "base": "c192de3c2 (origin/main = v0.1.120)",
+  "commit": "e73385e0343b1433d0dfc2f781733382980e3b79",
+  "portedPatch": "119-production-port-v2.patch (upstream 353a77eb)",
+  "checks": {
+    "catalog-goldens": {
+      "exit": 0,
+      "seconds": 7.2
+    },
+    "focused-tests": {
+      "exit": 0,
+      "seconds": 436.94
+    },
+    "server-typecheck-build": {
+      "exit": 0,
+      "seconds": 31.03
+    },
+    "server-bundle": {
+      "exit": 0,
+      "seconds": 1.56
+    },
+    "packaged-server-smoke": {
+      "exit": 0,
+      "seconds": 21.07
+    },
+    "ui-build": {
+      "exit": 0,
+      "seconds": 51.9,
+      "note": "1800MB heap OOM no primeiro try (exit -6); refeito com --max-old-space-size=4096 apenas para o vite"
+    }
+  },
+  "tests": {
+    "files": 35,
+    "passed": 615,
+    "skipped": 2,
+    "failed": 0,
+    "workers": 1
+  },
+  "catalog": {
+    "added_tools": [
+      "delete_table",
+      "execute_data",
+      "list_tables",
+      "query_data",
+      "routine_no_update"
+    ],
+    "upstream_tools_preserved": 50
+  },
+  "bundles": {
+    "server": ".local-upgrade/bundle/server",
+    "ui": ".local-upgrade/bundle/ui",
+    "sha256": ".local-upgrade/bundle-sha256.txt"
+  },
+  "notRun": [
+    "lint",
+    "typecheck global",
+    "suíte completa",
+    "app vivo",
+    "Electron/GPU (coordenador)"
+  ]
+}
