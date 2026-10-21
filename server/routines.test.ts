@@ -3818,6 +3818,19 @@ describe("a run with nothing new", () => {
     expect(asked.h.manager.listRuns()[0]!.noUpdate).toBeUndefined();
   });
 
+  it("is dropped when the run writes a result after the marker, and kept when that text is empty", async () => {
+    const spoke = await started();
+    spoke.h.manager.markNoUpdate(spoke.run.id);
+    spoke.h.manager.handleRuntimeEvent(event(spoke.threadId, { type: "item.completed", itemType: "assistant_text", text: "Drained 3 jobs" }));
+    expect(spoke.h.manager.handleRuntimeEvent(event(spoke.threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed", output: "Drained 3 jobs" });
+    expect(spoke.h.manager.listRuns()[0]!.noUpdate).toBeUndefined();
+
+    const blank = await started();
+    blank.h.manager.markNoUpdate(blank.run.id);
+    blank.h.manager.handleRuntimeEvent(event(blank.threadId, { type: "item.completed", itemType: "assistant_text", text: "  \n" }));
+    expect(blank.h.manager.handleRuntimeEvent(event(blank.threadId, { type: "turn.completed", ok: true }))).toMatchObject({ status: "completed", noUpdate: true });
+  });
+
   it("is forgotten when the run fails and starts again", async () => {
     const { h, run, threadId } = await started();
     h.manager.markNoUpdate(run.id);
