@@ -14,6 +14,7 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.t
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
+import { callOpenBotDataTool, OPENBOT_DATA_TOOL_NAMES } from "./agents-openbot-data.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -156,6 +157,13 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
 export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
+  if (name === "routine_no_update") {
+    const { ok, body } = await apiResponse("/api/internal/routine-no-update", {
+      method: "POST", body: JSON.stringify(args),
+    });
+    return ok ? { text: "No-update recorded for this run. End without text." }
+      : { text: String(body.error ?? "No-update was refused."), isError: true };
+  }
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
       method: "POST",
@@ -185,6 +193,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
+  if (OPENBOT_DATA_TOOL_NAMES.has(name)) return callOpenBotDataTool(name, args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };

@@ -6,6 +6,8 @@ import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { PERSON_TOOL_DEFINITIONS, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { OPENBOT_DATA_TOOL_DEFINITIONS } from "./agents-openbot-data.ts";
+import { ROUTINE_NO_UPDATE_TOOL } from "../openbot-routine-no-update.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
 export interface CatalogProfile {
@@ -193,6 +195,7 @@ const APPLIES_OUTCOME = " Read the result: it applies immediately at every acces
 const START_THREAD_SELF_ID = "Leave out, or use your own bot ID. For teammates use coordinate_bots.";
 
 const TOOL_DEFINITIONS = [
+  ...OPENBOT_DATA_TOOL_DEFINITIONS,
   {
     name: "create_options_card",
     description:
@@ -276,6 +279,7 @@ const TOOL_DEFINITIONS = [
       reason: { type: "string", minLength: 1, maxLength: 500, description: "One line: what you need from the person and why your work is parked on it." },
     }, required: ["reason"] },
   },
+  ROUTINE_NO_UPDATE_TOOL,
   {
     name: "list_bots",
     description:
