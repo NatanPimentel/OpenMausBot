@@ -14,7 +14,7 @@ import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, late
 import { cleanSchedule, cloneSchedule, limitResetOccurrence, loadSchedule, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
 import {
-  isRoutineProblemRun, type RoutineContextAttachment, type RoutineIntervalWindow, type RoutineRetryCause, type RoutineRunStatus, type RoutineRunTrigger,
+  isRoutineProblemRun, type RoutineContextAttachment, type RoutineIntervalWindow, type RoutineRetryCause, type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger,
 } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import {
@@ -27,6 +27,7 @@ import {
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
+import { cleanAttachments, cleanTimeoutMinutes, cloneAttachments, loadAttachments, loadTimeoutMinutes } from "./routine-attachments.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -130,8 +131,11 @@ export interface RoutineRun {
   error?: string;
   cost?: number | null;
   denials?: string[];
+  report?: RoutineRunReport;
   createdAt: number;
   seenAt?: number;
+  /** The run said it had nothing to report and then completed: its receipt stays, with no unread mark or completion notice. */
+  noUpdate?: true;
 }
 
 export interface RoutineRequestReceipt {
@@ -204,11 +208,12 @@ export interface RoutineManagerOptions {
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
-  createTask: (botId: string, title: string, activate?: boolean, run?: RoutineRun) => { threadId: string } | null;
+  createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
   joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => { threadId: string; main?: true } | undefined;
+  eventResultsThread?: (event: { webhookId: string; webhookName: string; botId: string }) => string | undefined;
   frozenResultsThread?: (botId: string, threadId: string) => boolean;
   discardResultsThread?: (botId: string, threadId: string) => void;
   startTurn: (
@@ -239,6 +244,8 @@ export interface RoutineManagerOptions {
   /** A run a restart cut off, before it starts again or fails: its old turn's work must not resume as well. */
   onRunCut?: (run: RoutineRun) => void;
   hasPendingDelegations?: (threadId: string) => boolean;
+  /** The turn in this thread is a routine's own, not one a person started there while its run waits on teammates. */
+  routineTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
   limitResetAt?: (engine: string) => number | null;
   /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run. */
@@ -255,14 +262,6 @@ const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
 const MAX_RUNS = 2_000;
-const MAX_ATTACHMENTS = 50;
-const attachmentSchema = z.object({
-  id: z.string().trim().min(1).max(200),
-  kind: z.enum(["file", "image"]),
-  name: z.string().trim().min(1).max(255),
-  path: z.string().trim().min(1).max(4_096),
-  size: z.number().finite().nonnegative(),
-});
 const ROUTINE_REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>([
   "create",
   "update",
@@ -274,51 +273,6 @@ const ROUTINE_REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>([
 
 function isRoutineRequestAction(value: unknown): value is RoutineRequestOperation["action"] {
   return typeof value === "string" && ROUTINE_REQUEST_ACTIONS.has(value as RoutineRequestOperation["action"]);
-}
-
-function cleanAttachments(value: unknown): RoutineContextAttachment[] {
-  if (value == null) return [];
-  if (!Array.isArray(value) || value.length > MAX_ATTACHMENTS) {
-    throw new Error(`Add no more than ${MAX_ATTACHMENTS} attachments`);
-  }
-  const ids = new Set<string>();
-  return value.map((candidate) => {
-    const parsed = attachmentSchema.safeParse(candidate);
-    if (!parsed.success || parsed.data.name.includes("\0") || parsed.data.path.includes("\0")) {
-      throw new Error("Choose a valid attachment");
-    }
-    if (ids.has(parsed.data.id)) throw new Error("Each attachment must be unique");
-    ids.add(parsed.data.id);
-    return { ...parsed.data };
-  });
-}
-
-function cleanTimeoutMinutes(value: unknown): number | undefined {
-  if (value == null) return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 5 || value > 240) {
-    throw new Error("Run limit must be a whole number from 5 to 240 minutes");
-  }
-  return value;
-}
-
-function loadTimeoutMinutes(value: unknown): number | undefined {
-  try {
-    return cleanTimeoutMinutes(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function loadAttachments(value: unknown): RoutineContextAttachment[] {
-  try {
-    return cleanAttachments(value);
-  } catch {
-    return [];
-  }
-}
-
-function cloneAttachments(attachments: readonly RoutineContextAttachment[] | undefined): RoutineContextAttachment[] {
-  return attachments?.map((attachment) => ({ ...attachment })) ?? [];
 }
 
 function loadTarget(value: unknown): RoutineTarget {
@@ -429,6 +383,7 @@ export class RoutineManager {
   private closing = false;
   private ownerNotices: RoutineOwnerNotice[] = [];
   private readonly failureFacts = new Map<string, RoutineFailureFacts>();
+  private readonly noUpdateRuns = new Set<string>();
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
   private frozenPending = false;
@@ -666,8 +621,27 @@ export class RoutineManager {
   }
 
   runForThread(threadId: string): RoutineRun | null {
-    const run = this.runs.find((candidate) => candidate.threadId === threadId);
+    const run = this.runs.findLast((candidate) => candidate.threadId === threadId && ["running", "waiting"].includes(candidate.status)) ??
+      this.runs.findLast((candidate) => candidate.threadId === threadId);
     return run ? cloneRun(run) : null;
+  }
+
+  /** Applies only if the run's current turn then completes it; a failure or a wait for the person still reports. */
+  markNoUpdate(runId: string): boolean {
+    const run = this.runs.find((candidate) => candidate.id === runId && candidate.status === "running");
+    if (!run) return false;
+    this.noUpdateRuns.add(run.id);
+    return true;
+  }
+
+  noteReport(id: string, report: RoutineRunReport | undefined): RoutineRun | null {
+    const run = this.runs.find((candidate) => candidate.id === id);
+    if (!run) return null;
+    if (report) run.report = report;
+    else delete run.report;
+    this.save();
+    this.emitRun(run);
+    return cloneRun(run);
   }
 
   create(input: RoutineInput, request?: RoutineRequestCommitFor<"create">): Routine {
@@ -705,6 +679,9 @@ export class RoutineManager {
     this.emitRoutine(routine);
     return this.routineWithHealth(routine);
   }
+
+  /** Routines and runs another server holds, under their own ids: `apply` edits the lists, which are saved whole or not at all. */
+  adopt(apply: (held: { routines: Routine[]; runs: RoutineRun[] }) => Routine[]): void { this.assertWritable(); let changed: Routine[] = []; this.commitMutation(() => { changed = apply({ routines: this.routines, runs: this.runs }); }); for (const routine of changed) this.emitRoutine(routine); }
 
   update(
     id: string,
@@ -912,7 +889,7 @@ export class RoutineManager {
       id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
       botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
-      ...(input.eventSource ? { eventSource: input.eventSource } : {}),
+      resultsThreadId: this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);
@@ -1254,7 +1231,7 @@ export class RoutineManager {
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, title) ?? null
             : null
-          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run);
+          : this.options.createTask(run.botId, title, run);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"
@@ -1307,7 +1284,7 @@ export class RoutineManager {
 
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
-    if (!run) return null;
+    if (!run || (run.target === "bot" && run.status === "waiting" && !run.asked && this.options.routineTurn?.(event.threadId) === false)) return null;
     if (event.type === "turn.started" || event.type === "turn.completed") settleAsk(run, undefined, this.now());
     // A room goal's orchestrator owns its result (finishGoalRun); a member's completion is intermediate.
     if (
@@ -1321,6 +1298,7 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "request.opened") {
+      this.noUpdateRuns.delete(run.id);
       run.asked ??= askOf(event, this.now());
       this.wait(run, waitingFor(run.asked));
     } else if (event.type === "request.resolved") {
@@ -1338,6 +1316,7 @@ export class RoutineManager {
       this.failureFacts.set(run.id, engineFacts(event));
     } else if (event.type === "turn.completed") {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
+      const noUpdate = this.noUpdateRuns.delete(run.id);
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
@@ -1348,6 +1327,7 @@ export class RoutineManager {
       if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for delegated work to finish");
       else {
         Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        if (noUpdate) run.noUpdate = true;
         this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
       }
       run.error = undefined;
@@ -1367,6 +1347,7 @@ export class RoutineManager {
 
   private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts) {
     this.failureFacts.delete(run.id);
+    this.noUpdateRuns.delete(run.id);
     if (this.closing) return;
     const backupReady = facts.limitResetsAt !== undefined && this.options.limitBackup?.(run.botId) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
@@ -1614,11 +1595,8 @@ export class RoutineManager {
       this.routines = before.routines;
       this.runs = before.runs;
       this.routineRequestReceipts = before.receipts;
-      try {
-        rollback?.();
-      } catch (cleanupError) {
-        console.error("routine: could not discard uncommitted results thread", cleanupError);
-      }
+      try { rollback?.(); }
+      catch (cleanupError) { console.error("routine: could not discard uncommitted results thread", cleanupError); }
       throw error;
     }
   }

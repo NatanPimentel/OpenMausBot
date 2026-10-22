@@ -178,6 +178,31 @@ describe("a usage-limit refusal", () => {
     expect(f.events.map(event => event.type)).toEqual(["turn.started"]);
   });
 
+  it("still recovers when SessionStart hooks precede the quota refusal", async () => {
+    const f = fixture();
+    await expect(f.send(() => {
+      for (const subtype of ["hook_started", "hook_started", "hook_response", "hook_response"]) {
+        f.recovery.frame("thread", { type: "system", subtype, hook_event: "SessionStart" });
+      }
+      f.recovery.frame("thread", { type: "system", subtype: "init" });
+      f.recovery.frame("thread", { type: "system", subtype: "status" });
+      f.recovery.frame("thread", { type: "user", isReplay: true });
+      refuse(f);
+    })).rejects.toMatchObject({ name: "TurnUsageLimitRefusedError", turnId: "turn" });
+    expect(f.stopped).toHaveBeenCalledOnce();
+    expect(f.events.map(event => event.type)).toEqual(["turn.started"]);
+  });
+
+  it("does not recover after a tool hook", async () => {
+    const f = fixture();
+    await expect(f.send(() => {
+      f.recovery.frame("thread", { type: "system", subtype: "hook_started", hook_event: "PreToolUse" });
+      refuse(f);
+    })).resolves.toHaveProperty("turnId");
+    expect(f.stopped).not.toHaveBeenCalled();
+    expect(f.events).toContainEqual(quota);
+  });
+
   it("publishes the limit as usual when recovery is off or the model already worked", async () => {
     const off = fixture();
     await expect(off.send(() => refuse(off), false)).resolves.toEqual({ turnId: "turn" });

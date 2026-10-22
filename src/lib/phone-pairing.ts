@@ -32,6 +32,8 @@ export interface PhonePairingAccess {
 export interface ConnectPhoneEntry {
   target: PhonePairingTarget;
   subtitleKey: LocaleKey;
+  /** A Team Cloud's name: everyone in the team opens it on their own phone. */
+  team?: string;
 }
 
 const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
@@ -41,6 +43,8 @@ const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
 };
 
 export function connectPhoneEntry(target: PhonePairingTarget, access: PhonePairingAccess | null): ConnectPhoneEntry | null {
+  const team = access?.session?.kind === "session" ? access.session.team?.name : undefined;
+  if (team) return { target, subtitleKey: "sidebar.menu.connectPhone.team", team };
   if (target !== "computer" && !(access && access.pairingCodes && isOwnerOrAdmin(access.session))) return null;
   return { target, subtitleKey: SUBTITLE[target] };
 }
@@ -111,6 +115,10 @@ export function takePhonePairingRequest(href: string): string | null {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+/** Where a page signed in by the app goes next: the phone pairing, or back to a path of this same server. */
 export function pairedDestination(search: string): string {
-  return new URLSearchParams(search).get("desktop-settings") === "phone" ? "/?desktop-settings=phone" : "/";
+  const params = new URLSearchParams(search);
+  if (params.get("desktop-settings") === "phone") return "/?desktop-settings=phone";
+  const next = params.get("next");
+  return next && /^\/(?!\/)/.test(next) && !next.startsWith("/pair") && !/[\\\s]/.test(next) ? next : "/";
 }
