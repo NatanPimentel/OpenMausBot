@@ -24,13 +24,31 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string; person?: s
  * otherwise every change relaunches it and the provider re-uploads the conversation at the cache-write rate. */
 // The last five describe one turn, not the conversation: where it came from and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
-// and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent", "availability",
-  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks"]);
+// and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards (the driver
+// keeps that rule on every later turn of a thread that has had one, so it does not flip in and out of the prefix).
+// "automation-reply" only says where a run's final reply goes; stable, it flipped on every alternation between an
+// automation's run and a person's message, and each flip re-wrote the whole conversation at the cache-write rate.
+export const VOLATILE_SECTION_IDS: ReadonlySet<string> = new Set(["memory", "mentions", "outstanding", "recent", "availability",
+  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks"]);
 
 /** Its id is what puts it in the volatile half. */
 export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {
   return { id: "availability", label: "Team availability", text: teammateAvailabilityPrompt(team) };
+}
+
+/** The webhook rule stays in the system prompt of every later turn of a thread that has had a webhook turn: present on
+ *  some turns and absent on others, it would change the cached prefix at each alternation. */
+export function createWebhookRule(max = 5_000) {
+  const threads = new Set<string>();
+  return {
+    applies(threadId: string, source: string | undefined): boolean {
+      if (source === "webhook" && !threads.has(threadId)) {
+        threads.add(threadId);
+        if (threads.size > max) threads.delete(threads.values().next().value!);
+      }
+      return threads.has(threadId);
+    },
+  };
 }
 
 /** One standing rule for a bridged turn, so every tool name the prompt, a description or a result gives
@@ -76,7 +94,7 @@ export function buildSystemPrompt(
     .filter((part) => part.text.length > 0)
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));
   const halves = (volatile: boolean) =>
-    sections.filter((section) => VOLATILE_SECTIONS.has(section.id) === volatile).map((section) => section.text).join("");
+    sections.filter((section) => VOLATILE_SECTION_IDS.has(section.id) === volatile).map((section) => section.text).join("");
   return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
 }
 
