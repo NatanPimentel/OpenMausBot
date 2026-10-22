@@ -16,6 +16,8 @@ describe("built-in agent tool read policy", () => {
       "list_triggers",
       "list_trigger_events",
       "skills_list",
+      "list_tables",
+      "query_data",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {
       expect(isReadOnlyAgentTool(name)).toBe(true);
@@ -31,7 +33,7 @@ describe("built-in agent tool read policy", () => {
   it.each([
     "shared_computer", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "close_thread", "post_to_room",
     // These post into the chat: never read-only.
-    "attach_file", "show_widget", "update_widget",
+    "attach_file", "show_widget", "update_widget", "show_html", "update_html",
     "create_bot", "request_credential", "request_sign_in", "memory_update", "create_trigger",
     "manage_trigger", "propose_profile", "skill_manage",
     "propose_team_setup", "propose_bot_deletion",

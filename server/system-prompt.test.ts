@@ -21,6 +21,8 @@ import {
   TRIGGER_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
+  AUTOMATION_REPLY_PROMPT,
+  createWebhookRule,
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
@@ -111,6 +113,24 @@ describe("buildSystemPrompt", () => {
     expect(built.volatile).toContain("Use the deploy skill.");
     expect(built.volatile).toContain(ROUTINE_EXECUTION_PROMPT);
     expect(built.stable).toBe(`You are Kiwi. Set yourself up.${WEBHOOK_PROMPT}`);
+  });
+
+  it("keeps the stable half equal across a person's message and an automation's run, so the cached prefix survives the switch", () => {
+    const turn = (source: "schedule" | "webhook" | undefined, rule: ReturnType<typeof createWebhookRule>) => buildSystemPrompt("You are Kiwi.", "", [
+      { id: "routine-execution", label: "Routine execution", text: source === "schedule" ? ROUTINE_EXECUTION_PROMPT : "" },
+      { id: "webhook", label: "Webhook provenance", text: rule.applies("t1", source) ? WEBHOOK_PROMPT : "" },
+      { id: "automation-reply", label: "Automation reply", text: source ? AUTOMATION_REPLY_PROMPT : "" },
+    ]);
+    const rule = createWebhookRule();
+    const person = turn(undefined, rule);
+    const scheduled = turn("schedule", rule);
+    expect(scheduled.stable).toBe(person.stable);
+    expect(scheduled.volatile).toContain(AUTOMATION_REPLY_PROMPT);
+    const hook = turn("webhook", rule);
+    const afterHook = turn(undefined, rule);
+    expect(hook.stable).toBe(afterHook.stable);
+    expect(afterHook.stable).toContain(WEBHOOK_PROMPT);
+    expect(turn(undefined, createWebhookRule()).stable).not.toContain(WEBHOOK_PROMPT);
   });
 
   it("has an empty volatile half when nothing mid-conversation is present", () => {
@@ -234,7 +254,7 @@ describe("computerPrompt", () => {
 
 describe("shared sentences", () => {
   it("each begins with one space so they concatenate onto the persona line", () => {
-    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, TRIGGER_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, SIGN_IN_PROMPT]) {
+    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, TRIGGER_PROMPT, ROUTINE_EXECUTION_PROMPT, AUTOMATION_REPLY_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, SIGN_IN_PROMPT]) {
       expect(sentence.startsWith(" ")).toBe(true);
       expect(sentence.startsWith("  ")).toBe(false);
     }
@@ -328,8 +348,8 @@ describe("cloudHomePrompt", () => {
   });
 
   it("points to a lent computer only when the turn has the shared-computer tools", () => {
-    expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a computer they lend to My Cloud is reachable through shared_computer");
-    expect(cloudHomePrompt(true)).toContain("turn on Let My Cloud use this computer under Settings → MausBot Cloud in OpenMausBot on that computer");
+    expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer");
+    expect(cloudHomePrompt(true)).toContain("turn on Let my bots use this computer under Settings → MausBot Cloud in OpenMausBot on that computer");
     expect(cloudHomePrompt(true)).toContain("use its say field when it has one");
     expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
     expect(cloudHomePrompt(false)).toContain("You cannot see or use their own computer, its screen or its files from here.");
