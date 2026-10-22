@@ -31,3 +31,25 @@ Nada em My Cloud (`server/cloud*`, config, consentimento) foi tocado; o envio au
 - `tsc -p tsconfig.server.build.json`, `scripts/bundle-server.mjs`, `smoke-packaged-server.mjs`: ok.
 - Build UI (vite): ok com heap 4096 MB. O bundle contém `notifications.read`.
 - Não rodados: lint, typecheck global, suíte completa, Electron. GPU é aplicado no app.asar novo na instalação.
+
+---
+
+# Porte para OpenMausBot v0.1.123 (22/10/2026, noite)
+
+Base: tag v0.1.123 (40deb33ce). Origem: `local/v0.1.122-mod` (porte da 0.1.121) + correção do Today (#3322) + a rodada 2 de hoje, aplicados por cherry-pick sem conflito de texto.
+
+## O que a rodada 2 acrescentou
+- **Reservas 8** (`server/routes/bot-patch.ts`, `MAX_FALLBACK`): o limite upstream era 5; a frota usa 8.
+- **Gatilho de app com exclusão** (`notSubject`, lista de palavras que o título não pode ter; palavra inteira, evento sem título passa): `shared/app-triggers.ts`, `server/app-events.ts`, `server/app-triggers.ts`, `server/app-trigger-requests.ts`.
+- **Ponte de troca de conta**: motivo de cada repasse pulado no `server.log` (`[account-handoff] skipped … reason=`), e conversa com anexo repassa o texto sem o anexo (`accountHandoffCheckpoint`).
+- **Metade estável do prompt**: `automation-reply` passou para a metade volátil e a regra do webhook fica em todas as voltas de uma conversa que já teve webhook; log `[prompt-cache] stable half changed … sections=` diz quais seções mudaram.
+
+## Tirado do porte / conferido contra a 0.1.123
+- Today: a página foi trocada pelo brief (#3314), mas `server/today.ts` (`needsYouNow`) continua e alimenta o "Needs you" do brief; a correção #3322 continua valendo (testes de Today e o e2e `late-question-today` passam).
+- #3328 (parada em tool longa aos 20 min) é do upstream: nada local a tirar.
+- Catálogo: 55 ferramentas upstream idênticas + 5 locais (`delete_table`, `execute_data`, `list_tables`, `query_data`, `routine_no_update`).
+
+## Verificação (1 worker, heap 1800 MB; UI com 4096 MB)
+- Vitest focado: 42 arquivos, 721 passaram, 1 pulado, 0 falhas (`verify-123.py`).
+- `tsc -p tsconfig.server.build.json`, `scripts/bundle-server.mjs`, `smoke-packaged-server.mjs` e `vite build`: ok.
+- Não rodados: lint, typecheck global, suíte completa, Electron.
