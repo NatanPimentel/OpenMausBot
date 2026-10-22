@@ -12,7 +12,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
-import { createBotPatchRoutes, type BotPatchRouteDeps } from "./bot-patch.ts";
+import { createBotPatchRoutes, MAX_FALLBACK, type BotPatchRouteDeps } from "./bot-patch.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 vi.mock("../vps-computer.ts", async (importOriginal) => {
@@ -49,6 +49,7 @@ function fixture() {
   const deps = {
     store,
     cfg,
+    registry: { get: () => ({}) },
     requestedTaskBot: () => null,
     activeVpsThreads,
     wireBot: (record: BotRecord) => record as unknown as WireBot,
@@ -320,5 +321,30 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.phoneApps).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id fallback chain", () => {
+  const chain = (size: number) => Array.from({ length: size }, (_, index) => ({ instanceId: `claude-${index}`, model: "claude-sonnet-5" }));
+
+  it("keeps up to eight reserve engines, in the order sent", async () => {
+    const { store, bot, patch } = fixture();
+
+    const saved = await patch(bot.id, { fallback: chain(8) });
+
+    expect(MAX_FALLBACK).toBe(8);
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(store.bot(bot.id)?.fallback?.map((entry) => entry.instanceId)).toEqual(chain(8).map((entry) => entry.instanceId));
+  });
+
+  it("refuses a ninth reserve and leaves the chain as it was", async () => {
+    const { store, bot, patch } = fixture();
+    await patch(bot.id, { fallback: chain(2) });
+
+    const refused = await patch(bot.id, { fallback: chain(9) });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/up to eight/);
+    expect(store.bot(bot.id)?.fallback).toHaveLength(2);
   });
 });

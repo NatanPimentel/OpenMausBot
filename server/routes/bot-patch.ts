@@ -35,6 +35,9 @@ import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
+/** Engines a bot tries in turn when its main one is out of quota; the upstream limit was five, the fleet uses eight. */
+export const MAX_FALLBACK = 8;
+
 export interface BotPatchRouteDeps {
   store: Store;
   cfg: AppConfig;
@@ -208,14 +211,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
       if (body.fallback !== undefined) {
-        if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
-          return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
+        if (!Array.isArray(body.fallback) || body.fallback.length > MAX_FALLBACK) {
+          return json(res, 400, { error: "fallback must be a list of up to eight { instanceId, model } entries" });
         }
         const chain: Array<{ instanceId: string; model: string }> = [];
         for (const entry of body.fallback as unknown[]) {
           const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
-            return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
+            return json(res, 400, { error: "fallback must be a list of up to eight { instanceId, model } entries" });
           }
           if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           if (chain.some((seen) => seen.instanceId === row.instanceId)) continue;

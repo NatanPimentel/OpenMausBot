@@ -27,6 +27,8 @@ interface Fixture {
   lift: () => void;
   claudePrompts: () => unknown[];
   dataDir: string;
+  /** The server's own log. */
+  serverLog: () => string;
   evidence: unknown[];
   memoryUrl?: string;
 }
@@ -154,6 +156,7 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       refuse: (info) => writeFileSync(limitedFile, JSON.stringify(info)),
       lift: () => rmSync(limitedFile, { force: true }),
       claudePrompts: () => jsonLines(promptsFile),
+      serverLog: () => existsSync(logPath) ? readFileSync(logPath, "utf8") : "",
     });
   } finally {
     const evidencePath = `${logPath}.limit-reset.json`;
@@ -207,7 +210,7 @@ it("the stopped turn's Continue sets up a run that continues the conversation on
 
 it.each(["echo", "offline"] as const)("uses a durable account handoff only after the memory bridge succeeds (%s)", async memoryBridge => {
   await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, fleetAccountFailover: true, memoryBridge },
-    async ({ api, control, limit, claudePrompts, dataDir }) => {
+    async ({ api, control, limit, claudePrompts, dataDir, serverLog }) => {
       const { bot } = await control("new-bot", "--name", "Memory continuity");
       const threadId = bot.activeTaskId;
       await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: { ...bot.modelSelection, effort: "medium" } });
@@ -240,6 +243,39 @@ it.each(["echo", "offline"] as const)("uses a durable account handoff only after
         expect(request.summary).not.toContain("LATEST_REQUEST");
       }
       expect((await messagesOf(api, sibling.threadId)).some(message => message.kind === "compaction")).toBe(false);
+      const handoffLines = serverLog().split("\n").filter(line => line.includes("[account-handoff]") && line.includes(`thread=${threadId}`));
+      if (memoryBridge === "echo") expect(handoffLines).toEqual([expect.stringMatching(/carried bot=\S+ thread=\S+ bytes=\d+ attachments-left-out=false$/)]);
+      else expect(handoffLines).toEqual([expect.stringMatching(/skipped bot=\S+ thread=\S+ reason=bridge-failed$/)]);
+    });
+}, 120_000);
+
+it("an account switch in a short conversation says so in the log, and one with an attachment still carries its words", async () => {
+  await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, fleetAccountFailover: true, memoryBridge: "echo" },
+    async ({ api, control, limit, claudePrompts, dataDir, serverLog }) => {
+      const short = (await control("new-bot", "--name", "Short")).bot;
+      const long = (await control("new-bot", "--name", "With attachment")).bot;
+      for (const text of ["OLD_GOAL use port 9000", "SHARE the file <attached-file path=\"/private/evidence-SECRET.pdf\" name=\"evidence-SECRET.pdf\" />", "CORRECTION use port 9001", "RECENT_WORK finish the report"]) {
+        await control("send", "--bot", long.id, "--task", long.activeTaskId, "--text", text);
+        expect((await control("wait", "--bot", long.id, "--task", long.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      }
+      limit(Math.floor(Date.now() / 1000) + 600);
+      await control("send", "--bot", short.id, "--task", short.activeTaskId, "--text", "ONLY_REQUEST do it once");
+      expect((await control("wait", "--bot", short.id, "--task", short.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      expect(existsSync(join(dataDir, "memory-bridge-request.json"))).toBe(false);
+      await control("send", "--bot", long.id, "--task", long.activeTaskId, "--text", "LATEST_REQUEST finish the report once");
+      expect((await control("wait", "--bot", long.id, "--task", long.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      const lines = serverLog().split("\n").filter(line => line.includes("[account-handoff]"));
+      expect(lines.filter(line => line.includes(`thread=${short.activeTaskId}`))).toEqual([expect.stringMatching(/skipped .* reason=short-conversation$/)]);
+      expect(lines.filter(line => line.includes(`thread=${long.activeTaskId}`))).toEqual([expect.stringMatching(/carried .* attachments-left-out=true$/)]);
+      const request = JSON.parse(readFileSync(join(dataDir, "memory-bridge-request.json"), "utf8"));
+      expect(request.summary).toContain("SHARE the file");
+      expect(request.summary).not.toContain("evidence-SECRET");
+      expect(request.summary).not.toContain("LATEST_REQUEST");
+      const prompt = JSON.stringify(claudePrompts().at(-1));
+      expect(prompt).toContain("Earlier conversation summary");
+      expect(prompt).toContain("CORRECTION");
+      expect(prompt).not.toContain("evidence-SECRET");
+      expect(await messagesOf(api, long.activeTaskId)).toContainEqual(expect.objectContaining({ kind: "compaction" }));
     });
 }, 120_000);
 

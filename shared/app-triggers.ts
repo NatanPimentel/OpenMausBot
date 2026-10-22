@@ -9,6 +9,9 @@ export interface AppTriggerFilter {
   from?: string;
   /** The subject (or title) contains this. */
   subject?: string;
+  /** None of these words or phrases appear in the subject (or title), as whole words: "live" does not turn away
+   *  "Oliveira". An event with no subject or title is not held back by it. */
+  notSubject?: string[];
   label?: string;
   /** Anywhere in the event. */
   text?: string;
@@ -161,6 +164,7 @@ export function gmailSearchQuery(filter: AppTriggerFilter | undefined): string {
   return [
     filter.from && `from:${quoted(filter.from)}`,
     filter.subject && `subject:(${filter.subject.replace(/[()\\]/g, " ").replace(/\s+/g, " ").trim()})`,
+    ...(filter.notSubject ?? []).map((term) => `-subject:${quoted(term)}`),
     filter.label && `label:${quoted(filter.label).replace(/\s+/g, "-")}`,
     filter.text && quoted(filter.text),
   ].filter(Boolean).join(" ");

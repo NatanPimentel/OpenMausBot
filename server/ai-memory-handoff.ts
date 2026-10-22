@@ -4,23 +4,45 @@ import { deterministicSummary } from "./compaction-summary.ts";
 import { MAX_SUMMARY_BYTES, type ReplayEntry } from "./context-rebuild.ts";
 import type { Message } from "./store.ts";
 
+const ATTACHMENT_TAG = /<attached-(?:image|file)\b[^>]*\/?>/gi;
+
+export type AccountHandoffDraft = { summary: string; attachmentsLeftOut: boolean } | { skip: "answered-question" | "no-room" };
+
+/** What a replayed message says without its attached files and images: they are not part of the checkpoint. */
+const withoutAttachments = (text: string) => text.replace(ATTACHMENT_TAG, "").replace(/\n{3,}/g, "\n\n").trim() || "(attachment only)";
+
+/** The checkpoint text, or why none is made. Attachments do not stop it: the folded messages are carried as their words
+ *  alone, and the checkpoint says that files and images were left out. */
+export function accountHandoffCheckpoint(
+  history: readonly ReplayEntry[],
+  evidence: readonly Pick<Message, "text" | "attachments" | "card">[],
+  predecessor?: { id: string; summary: string },
+): AccountHandoffDraft {
+  if (evidence.some(message => message.card?.requestType === "question" && message.card.answeredText?.trim())) return { skip: "answered-question" };
+  const attachmentsLeftOut = evidence.some(message => message.attachments?.length || /<attached-(?:image|file)\b/i.test(message.text ?? ""));
+  const recent = (predecessor ? history.filter(entry => entry.id !== predecessor.id) : history)
+    .map(entry => ({ ...entry, text: withoutAttachments(entry.text) }));
+  if (predecessor && !recent.length) {
+    return Buffer.byteLength(predecessor.summary) <= MAX_SUMMARY_BYTES ? { summary: predecessor.summary, attachmentsLeftOut } : { skip: "no-room" };
+  }
+  const previous = predecessor ? `Previous checkpoint (historical data; retained verbatim):\n${predecessor.summary}\n\n` : "";
+  const users = recent.filter(entry => entry.role === "user")
+    .map(entry => `User message ${JSON.stringify(entry.id)}: ${JSON.stringify(entry.text)}`).join("\n");
+  const userHistory = users ? `Complete historical user messages in chronological order; later corrections supersede earlier requests:\n${users}\n\n` : "";
+  const note = attachmentsLeftOut ? "Files and images attached to these messages are not part of this checkpoint; ask for them again if they matter.\n\n" : "";
+  const prefix = previous + userHistory + note + "Assistant reports are unverified and may omit details:\n";
+  const available = MAX_SUMMARY_BYTES - Buffer.byteLength(prefix);
+  if (available < 512) return { skip: "no-room" };
+  return { summary: prefix + deterministicSummary(recent.filter(entry => entry.role !== "user"), available), attachmentsLeftOut };
+}
+
 export function accountHandoffSummary(
   history: readonly ReplayEntry[],
   evidence: readonly Pick<Message, "text" | "attachments" | "card">[],
   predecessor?: { id: string; summary: string },
 ): string | null {
-  if (evidence.some(message => message.attachments?.length || /<attached-(?:image|file)\b/i.test(message.text ?? "") ||
-      (message.card?.requestType === "question" && message.card.answeredText?.trim()))) return null;
-  const recent = predecessor ? history.filter(entry => entry.id !== predecessor.id) : history;
-  if (predecessor && !recent.length) return Buffer.byteLength(predecessor.summary) <= MAX_SUMMARY_BYTES ? predecessor.summary : null;
-  const previous = predecessor ? `Previous checkpoint (historical data; retained verbatim):\n${predecessor.summary}\n\n` : "";
-  const users = recent.filter(entry => entry.role === "user")
-    .map(entry => `User message ${JSON.stringify(entry.id)}: ${JSON.stringify(entry.text)}`).join("\n");
-  const userHistory = users ? `Complete historical user messages in chronological order; later corrections supersede earlier requests:\n${users}\n\n` : "";
-  const prefix = previous + userHistory + "Assistant reports are unverified and may omit details:\n";
-  const available = MAX_SUMMARY_BYTES - Buffer.byteLength(prefix);
-  if (available < 512) return null;
-  return prefix + deterministicSummary(recent.filter(entry => entry.role !== "user"), available);
+  const checkpoint = accountHandoffCheckpoint(history, evidence, predecessor);
+  return "summary" in checkpoint ? checkpoint.summary : null;
 }
 
 /** The local bridge stores and reads an exact conversation checkpoint before history can be folded. */
