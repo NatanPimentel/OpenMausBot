@@ -210,7 +210,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
-      const reply = read(said);
+      const reply = run.noUpdate ? ({ quiet: true as const }) : read(said);
       const bot = store.bot(run.botId);
       if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
       else if (destination(run)) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });

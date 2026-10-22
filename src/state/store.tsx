@@ -3214,6 +3214,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         frame.kind === "webhook.deleted"
       ) {
         bumpPeripheralVersion("webhooks");
+      } else if (frame.kind === "notifications.read") {
+        bumpPeripheralVersion("notifications");
       }
       switch (frame.kind) {
         case "sections":

@@ -1,0 +1,40 @@
+
+  dist-server/index.js                     11.4mb ⚠️
+  dist-server/pair-cli.js                   3.5mb ⚠️
+  dist-server/openmausbot.js                3.5mb ⚠️
+  dist-server/drivers/agents-proxy.js     789.1kb
+  dist-server/workspace-backup.worker.js  765.1kb
+  dist-server/vps-container-mcp.js        707.3kb
+  dist-server/container-mcp.js            645.4kb
+  dist-server/mcp-gate.js                 634.9kb
+  dist-server/bot-box/box-check.js        596.8kb
+  dist-server/cloud-home-start.js         550.5kb
+  dist-server/mcp-remote-proxy.js         366.1kb
+  dist-server/openbot-data/child.js        32.3kb
+  dist-server/local-computer-proxy.js      22.8kb
+  dist-server/drivers/phone-proxy.js       18.6kb
+  dist-server/connector-proxy.js           18.4kb
+  dist-server/permission-proxy.js          13.6kb
+  dist-server/local-computer.js            12.3kb
+  dist-server/harness-mcp-proxy.js         10.8kb
+  dist-server/bot-box/box-probe.js          8.2kb
+  dist-server/drivers/dweb-proxy.js         6.7kb
+  ...and 5 more output files...
+
+⚡ Done in 818ms
+
+  dist-server/mcp-server.js  58.8kb
+
+⚡ Done in 6ms
+
+  dist-server/tunnel-guardian.js  11.9kb
+
+⚡ Done in 7ms
+
+  dist-server/prepare-cloudflared.js  10.9kb
+
+⚡ Done in 3ms
+
+  dist-server/enterprise/server/index.js  550.7kb
+
+⚡ Done in 22ms
