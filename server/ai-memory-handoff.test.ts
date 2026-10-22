@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
-import { accountHandoffSummary, roundtripAccountHandoff } from "./ai-memory-handoff.ts";
+import { accountHandoffCheckpoint, accountHandoffSummary, roundtripAccountHandoff } from "./ai-memory-handoff.ts";
 
 const directories: string[] = [];
 const input = {
@@ -95,15 +95,40 @@ it("reserves room for the complete predecessor and every new folded user instruc
   ], [], { id: "prior", summary: "p".repeat(3_500) })).toBeNull();
 });
 
-it.each(["image", "file"])("declines folding a message with required %s evidence", kind => {
-  expect(accountHandoffSummary([{ id: "old", role: "user", text: "See evidence" }], [{
-    text: `See evidence\n<attached-${kind} path="/private/evidence"/>`,
-  }])).toBeNull();
+it.each(["image", "file"])("carries the words of a message that had %s evidence, without the attachment", kind => {
+  const tag = `<attached-${kind} path="/private/evidence.bin" name="evidence.bin" />`;
+  const draft = accountHandoffCheckpoint([
+    { id: "old", role: "user", text: `See evidence\n\n${tag}` },
+    { id: "only", role: "user", text: tag },
+    { id: "reply", role: "assistant", text: `Read it ${tag}` },
+  ], [{ text: `See evidence\n${tag}` }]);
+  expect(draft).toMatchObject({ attachmentsLeftOut: true });
+  const summary = "summary" in draft ? draft.summary : "";
+  expect(summary).toContain("See evidence");
+  expect(summary).toContain("(attachment only)");
+  expect(summary).toContain("not part of this checkpoint");
+  expect(summary).not.toContain("/private/evidence.bin");
+  expect(summary).not.toContain("attached-");
 });
 
-it("declines folding attachment-only evidence and resolved question-card answers", () => {
+it("carries a conversation whose only attachment is stored beside the text", () => {
   const folded = [{ id: "old", role: "user" as const, text: "Remember the decision" }];
-  expect(accountHandoffSummary(folded, [{ attachments: [{ kind: "image", path: "/private/evidence.png", mime: "image/png" }] }])).toBeNull();
+  const draft = accountHandoffCheckpoint(folded, [{ attachments: [{ kind: "image", path: "/private/evidence.png", mime: "image/png" }] }]);
+  expect(draft).toMatchObject({ attachmentsLeftOut: true });
+  expect(accountHandoffSummary(folded, [{ text: "no attachment" }])).not.toContain("not part of this checkpoint");
+  expect(accountHandoffCheckpoint(folded, [{ text: "no attachment" }])).toMatchObject({ attachmentsLeftOut: false });
+});
+
+it("names why no checkpoint is made", () => {
+  const folded = [{ id: "old", role: "user" as const, text: "Remember the decision" }];
+  expect(accountHandoffCheckpoint(folded, [{ card: {
+    title: "Which port?", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
+  } }])).toEqual({ skip: "answered-question" });
+  expect(accountHandoffCheckpoint([{ id: "too-long", role: "user", text: "u".repeat(6_001) }], [])).toEqual({ skip: "no-room" });
+});
+
+it("declines folding resolved question-card answers", () => {
+  const folded = [{ id: "old", role: "user" as const, text: "Remember the decision" }];
   expect(accountHandoffSummary(folded, [{ card: {
     title: "Which port?", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
   } }])).toBeNull();

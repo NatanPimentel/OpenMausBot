@@ -58,7 +58,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
 
   const save = async () => {
     const bot = bots.find((candidate) => candidate.id === botId);
-    const cleanFilter = Object.fromEntries(Object.entries(filter).filter(([, value]) => typeof value === "string" && value.trim())) as AppTriggerFilter;
+    const cleanFilter = Object.fromEntries(Object.entries(filter).filter(([, value]) => (Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.trim()))) as AppTriggerFilter;
     setSaving(true);
     setError("");
     try {
@@ -77,7 +77,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
       setSaving(false);
     }
   };
-  const filterField = (key: keyof AppTriggerFilter, label: string, placeholder: string) => (
+  const filterField = (key: "from" | "subject" | "label" | "text", label: string, placeholder: string) => (
     <label className="block" key={key}>
       <span className={LABEL}>{label}</span>
       <input value={filter[key] ?? ""} onChange={(input) => setFilter((current) => ({ ...current, [key]: input.target.value }))} placeholder={placeholder} className={FIELD} />

@@ -15,7 +15,7 @@ import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntime
 import { z } from "zod";
 import { boundedContextText, selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
-import { accountHandoffSummary, roundtripAccountHandoff } from "./ai-memory-handoff.ts";
+import { accountHandoffCheckpoint, roundtripAccountHandoff } from "./ai-memory-handoff.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -7602,6 +7602,8 @@ async function compactConversation(input: {
   accountHandoff?: { boundaryId: string; requestId: string };
 }): Promise<void> {
   const { bot, threadId, generation, instance, model, excludedIds, manual, accountHandoff } = input;
+  // An account switch that carries no checkpoint leaves a line in server.log saying why; ids only, never message text.
+  const handoffSkipped = (reason: string) => { if (accountHandoff) console.log(`[account-handoff] skipped bot=${bot.id} thread=${threadId} reason=${reason}`); };
   const task = store.taskByThread(bot.id, threadId);
   if (!task || (!manual && !accountHandoff && cfg.context?.autoCompact === false)) return;
   const messages = store.activePath(threadId);
@@ -7615,7 +7617,7 @@ async function compactConversation(input: {
     maxMessages: Number.MAX_SAFE_INTEGER, excludedIds, compaction: record,
   });
   const history = selected.transcript.filter(entry => entry.id);
-  if (!history.length) return;
+  if (!history.length) { handoffSkipped("short-conversation"); return; }
   const measurement = compactionReading(instance.adapter.capabilities, task.lastContextModel === `${instance.instanceId}:${model}` && !task.rewound ? task.usage?.context : undefined);
   const window = contextWindowFor(model, instance.models, measurement?.window);
   const bytes = history.reduce((n, entry) => n + Buffer.byteLength(entry.text), 0);
@@ -7628,16 +7630,19 @@ async function compactConversation(input: {
   if (!manual && !accountHandoff && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
     budget: compactBudget(window, cfg.context?.compactAt, nativeCompactAt), floor, window, nativeCompactAt })) return;
   const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
-  if (!fold) return;
+  if (!fold) { handoffSkipped("short-conversation"); return; }
   const foldedThroughId = manual
     ? context.findLast(entry => !excludedIds.has(entry.id))?.id
     : fold.folded.at(-1)?.id;
-  if (!foldedThroughId) return;
+  if (!foldedThroughId) { handoffSkipped("short-conversation"); return; }
   const predecessor = accountHandoff && selected.compacted > 0 ? record : undefined;
-  let handoffSummary: string | null | undefined;
+  let handoffSummary: string | undefined;
+  let attachmentsLeftOut = false;
   if (accountHandoff) {
-    handoffSummary = accountHandoffSummary(fold.folded, messages, predecessor);
-    if (handoffSummary === null) return;
+    const draft = accountHandoffCheckpoint(fold.folded, messages, predecessor);
+    if ("skip" in draft) { handoffSkipped(draft.skip); return; }
+    handoffSummary = draft.summary;
+    attachmentsLeftOut = draft.attachmentsLeftOut;
   }
   const prefix = JSON.stringify(messages);
   const controller = new AbortController();
@@ -7660,10 +7665,11 @@ async function compactConversation(input: {
       if (manual) throw new Error("the conversation changed during summarization — please retry");
       return;
     }
-    if (summary === undefined) return;
-    if (accountHandoff && Buffer.byteLength(summary) > MAX_SUMMARY_BYTES) return;
+    if (summary === undefined) { handoffSkipped(task.cwd ? "bridge-failed" : "no-folder"); return; }
+    if (accountHandoff && Buffer.byteLength(summary) > MAX_SUMMARY_BYTES) { handoffSkipped("checkpoint-too-large"); return; }
     const storedSummary = boundedContextText(summary, MAX_SUMMARY_BYTES);
-    if (accountHandoff && predecessor && !storedSummary.includes(predecessor.summary)) return;
+    if (accountHandoff && predecessor && !storedSummary.includes(predecessor.summary)) { handoffSkipped("checkpoint-lost-predecessor"); return; }
+    if (accountHandoff) console.log(`[account-handoff] carried bot=${bot.id} thread=${threadId} bytes=${Buffer.byteLength(storedSummary)} attachments-left-out=${attachmentsLeftOut}`);
     store.appendMessage(threadId, {
       role: "bot", kind: "compaction",
       compaction: { summary: storedSummary, firstKeptId: fold.firstKeptId, foldedThroughId,
@@ -9189,10 +9195,13 @@ async function startTurn(
             } });
             if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
+            const handoffWanted = e instanceof TurnUsageLimitRefusedError && Boolean(process.env.OMB_AI_MEMORY_HANDOFF_COMMAND);
+            const handoffGap = instance.driverKind !== "claudeAgent" || target.driverKind !== "claudeAgent" ? "not-claude-to-claude"
+              : target.instanceId === instanceId ? "same-account" : !recoveryUserMessageId ? "no-request" : undefined;
+            if (handoffWanted && handoffGap) console.log(`[account-handoff] skipped bot=${bot.id} thread=${threadId} reason=${handoffGap}`);
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
               automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1,
-              accountHandoff: e instanceof TurnUsageLimitRefusedError && process.env.OMB_AI_MEMORY_HANDOFF_COMMAND &&
-                instance.driverKind === "claudeAgent" && target.driverKind === "claudeAgent" && target.instanceId !== instanceId && recoveryUserMessageId
+              accountHandoff: handoffWanted && !handoffGap && recoveryUserMessageId
                 ? { boundaryId: `${recoveryUserMessageId}:${target.instanceId}`, requestId: recoveryUserMessageId } : undefined });
             // The backup now owns these callbacks: publish no failed result and release no queued receipt in between.
             directFollowupSettlers.delete(dispatchClaimId);
