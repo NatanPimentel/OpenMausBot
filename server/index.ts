@@ -412,6 +412,7 @@ import {
   resolveComputerPromptKind,
   savedLoginsPrompt,
   teamAvailabilityPart,
+  createWebhookRule, VOLATILE_SECTION_IDS,
 } from "./system-prompt.ts";
 import { shellTimeoutHookResult } from "./shell-timeout-hint.ts";
 import { spillToolResult } from "./tool-result-spill.ts";
@@ -7475,6 +7476,22 @@ function peerReplayText(m: Message, name: string, text: string): string {
   return `${note}\n${JSON.stringify(escapeNotes(text))}`;
 }
 
+/** One line in server.log when the stable half of a thread's system prompt differs from its previous turn: which
+ *  sections, never their text. Each such change re-writes the conversation in the provider's cache. */
+const webhookRule = createWebhookRule();
+const stableHalfSeen = new Map<string, Map<string, string>>();
+function logStableHalfChange(threadId: string, botId: string, sections: ReadonlyArray<{ id: string; text: string }>): void {
+  const stable = new Map(sections.filter((section) => !VOLATILE_SECTION_IDS.has(section.id))
+    .map((section) => [section.id, createHash("sha256").update(section.text).digest("hex").slice(0, 12)]));
+  const before = stableHalfSeen.get(threadId);
+  stableHalfSeen.delete(threadId);
+  stableHalfSeen.set(threadId, stable);
+  if (stableHalfSeen.size > 2_000) stableHalfSeen.delete(stableHalfSeen.keys().next().value!);
+  if (!before) return;
+  const changed = [...new Set([...before.keys(), ...stable.keys()])].filter((id) => before.get(id) !== stable.get(id));
+  if (changed.length) console.log(`[prompt-cache] stable half changed bot=${botId} thread=${threadId} sections=${changed.join(",")}`);
+}
+
 async function compactConversation(input: {
   bot: BotRecord; threadId: string; generation: string;
   instance: NonNullable<ReturnType<typeof registry.get>>; model: string;
@@ -8860,11 +8877,12 @@ async function startTurn(
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(store.bot(bot.id) ?? bot, threadId, instance) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
-        { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
+        { id: "webhook", label: "Webhook provenance", text: webhookRule.applies(threadId, opts?.automationSource) ? WEBHOOK_PROMPT : "" },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "" },
       ].filter((part) => !confined || READ_AND_DRAFT_PARTS.has(part.id)), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
+      logStableHalfChange(threadId, bot.id, prompt.sections);
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
       const recalled = autoRecallPrompt(bot, threadId, resolvedImages.text, {
         // A routine run starts fresh, and a webhook is untrusted: neither pulls earlier conversations in.
