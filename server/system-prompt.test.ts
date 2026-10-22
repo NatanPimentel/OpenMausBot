@@ -22,6 +22,7 @@ import {
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
   AUTOMATION_REPLY_PROMPT,
+  createWebhookRule,
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
@@ -132,6 +133,24 @@ describe("buildSystemPrompt", () => {
     expect(at(" On the phone.").stable).toBe("You are Kiwi. The phone.");
     expect(at(" At the computer.").stable).toBe(at(" On the phone.").stable);
     expect(at(" On the phone.").volatile).toBe(" On the phone.");
+  });
+
+  it("keeps the stable half equal across a person's message and an automation's run, so the cached prefix survives the switch", () => {
+    const turn = (source: "schedule" | "webhook" | undefined, rule: ReturnType<typeof createWebhookRule>) => buildSystemPrompt("You are Kiwi.", "", [
+      { id: "routine-execution", label: "Routine execution", text: source === "schedule" ? ROUTINE_EXECUTION_PROMPT : "" },
+      { id: "webhook", label: "Webhook provenance", text: rule.applies("t1", source) ? WEBHOOK_PROMPT : "" },
+      { id: "automation-reply", label: "Automation reply", text: source ? AUTOMATION_REPLY_PROMPT : "" },
+    ]);
+    const rule = createWebhookRule();
+    const person = turn(undefined, rule);
+    const scheduled = turn("schedule", rule);
+    expect(scheduled.stable).toBe(person.stable);
+    expect(scheduled.volatile).toContain(AUTOMATION_REPLY_PROMPT);
+    const hook = turn("webhook", rule);
+    const afterHook = turn(undefined, rule);
+    expect(hook.stable).toBe(afterHook.stable);
+    expect(afterHook.stable).toContain(WEBHOOK_PROMPT);
+    expect(turn(undefined, createWebhookRule()).stable).not.toContain(WEBHOOK_PROMPT);
   });
 
   it("has an empty volatile half when nothing mid-conversation is present", () => {
