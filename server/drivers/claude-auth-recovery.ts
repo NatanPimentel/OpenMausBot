@@ -2,7 +2,7 @@ import { TurnAuthenticationRefusedError, TurnUsageLimitRefusedError, type Runtim
 import { classifyError, USAGE_LIMIT } from "./retry.ts";
 
 type Frame = {
-  type?: string; subtype?: string; error?: unknown; is_api_error_message?: unknown; api_error?: unknown;
+  type?: string; subtype?: string; hook_event?: unknown; error?: unknown; is_api_error_message?: unknown; api_error?: unknown;
   is_error?: unknown; isReplay?: unknown; total_cost_usd?: unknown;
   message?: { model?: unknown; content?: unknown };
 };
@@ -28,9 +28,10 @@ function syntheticRefusal(frame: Frame): Refusal | undefined {
 }
 
 // Claude Code 2.1.296 sends `system/status "requesting"` before a signed-out refusal, and 2.1.272 a `rate_limit_event`
-// before a usage-limit one; none of them, nor init, is model activity.
+// before a usage-limit one. SessionStart hook notifications also precede model submission.
 const preamble = (frame: Frame) =>
-  frame.type === "system" && (frame.subtype === "init" || frame.subtype === "status") || frame.type === "user" && frame.isReplay === true ||
+  frame.type === "system" && (frame.subtype === "init" || frame.subtype === "status" ||
+    frame.hook_event === "SessionStart" && (frame.subtype === "hook_started" || frame.subtype === "hook_response")) || frame.type === "user" && frame.isReplay === true ||
   frame.type === "rate_limit_event";
 
 const refusedStop = { auth: "auth_required", limit: "quota" } as const;

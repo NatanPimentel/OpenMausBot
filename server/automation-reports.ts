@@ -206,7 +206,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     runSettled(run: RoutineRun, turnId?: string): void {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
-      const reply = read(said);
+      const reply = run.noUpdate ? ({ quiet: true as const }) : read(said);
       const bot = store.bot(run.botId);
       if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
       else if (destination(run)) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });

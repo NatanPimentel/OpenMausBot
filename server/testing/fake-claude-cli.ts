@@ -678,6 +678,10 @@ const playTurn = (prompt: JsonValue, late = false) => {
     }
   }
 
+  if (process.env.FAKE_CLAUDE_SESSION_START_FRAMES === "1") {
+    out({ type: "system", subtype: "hook_started", hook_event: "SessionStart", session_id: sessionId });
+    out({ type: "system", subtype: "hook_response", hook_event: "SessionStart", exit_code: 0, outcome: "success", session_id: sessionId });
+  }
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools, ...mcpStatus() });
   const limitedFile = process.env.FAKE_CLAUDE_LIMITED_FILE;

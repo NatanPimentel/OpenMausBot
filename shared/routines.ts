@@ -169,6 +169,8 @@ export interface RoutineRun {
   report?: RoutineRunReport;
   createdAt: number;
   seenAt?: number;
+  /** The run said it had nothing to report and then completed: its receipt stays, with no unread mark or completion notice. */
+  noUpdate?: true;
 }
 
 export interface RoutineInput {

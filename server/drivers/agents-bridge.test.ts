@@ -9,6 +9,7 @@ import { isOutboundTool } from "../../shared/outbound.ts";
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { READ_ONLY_ANNOTATIONS } from "../agent-tool-policy.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
+import { OPENBOT_DATA_TOOL_NAMES } from "./agents-openbot-data.ts";
 import { availableTools, catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog.ts";
 import {
   BRIDGE_HOT_TOOL_NAMES,
@@ -71,6 +72,7 @@ describe("what a bridged turn is listed", () => {
       "tool_result_read",
       "list_room_targets",
       "coordinate_bots",
+      "routine_no_update",
       "list_bots",
       "list_rooms",
       "select_computer",
@@ -90,6 +92,7 @@ describe("what a bridged turn is listed", () => {
       "tool_result_read",
       "list_room_targets",
       "coordinate_bots",
+      "routine_no_update",
       "list_bots",
       "list_rooms",
       "select_computer",
@@ -109,12 +112,12 @@ describe("what a bridged turn is listed", () => {
   it("names every hot tool the catalog really has, so a renamed tool cannot fall out of the list unnoticed", () => {
     const everyName = new Set(everyProfile().flatMap(({ profile: turn }) => names(availableTools(turn))));
     for (const hot of BRIDGE_HOT_TOOL_NAMES) expect(everyName.has(hot), hot).toBe(true);
-    // 11 to 14 of them on any one turn, always fewer than the turn has
+    // 11 to 15 of them (routine_no_update is a local addition) on any one turn, always fewer than the turn has
     for (const { name, profile: turn } of everyProfile()) {
       const tools = availableTools(turn);
       const hot = createToolBridge(tools as BridgeTool[]).listed.length - 2;
       expect(hot, name).toBeGreaterThanOrEqual(11);
-      expect(hot, name).toBeLessThanOrEqual(14);
+      expect(hot, name).toBeLessThanOrEqual(15);
       expect(hot, name).toBeLessThan(tools.length / 2);
     }
   });
@@ -262,9 +265,24 @@ describe("find_tool", () => {
     ["retry the failed thread", "retry_thread"],
     ["cron", "create_trigger"],
   ])("ranks the hidden tool first from how a person would ask: %s", async (query, expected) => {
-    const matches = (await found(bridgeFor(FULL_CHIEF), query)).matches;
+    const upstream = availableTools(profile(FULL_CHIEF)).filter(tool => !OPENBOT_DATA_TOOL_NAMES.has(tool.name)) as BridgeTool[];
+    const matches = (await found(createToolBridge(upstream), query)).matches;
     expect(matches[0]!.name).toBe(expected);
     expect(matches.length).toBeLessThanOrEqual(FIND_MATCHES_MAX);
+  });
+
+  it.each([
+    ["delete a teammate", "propose_bot_deletion"],
+    ["pause or delete one of my routines", "manage_trigger"],
+  ])("still finds the upstream tool beside the shared data tools: %s", async (query, expected) => {
+    expect((await found(bridgeFor(FULL_CHIEF), query)).matches.map(match => match.name)).toContain(expected);
+  });
+
+  it.each([
+    ["run a read-only SQL query on the shared tables", "query_data"],
+    ["permanently remove a shared table", "delete_table"],
+  ])("finds the shared data tool: %s", async (query, expected) => {
+    expect((await found(bridgeFor(FULL_CHIEF), query)).matches[0]!.name).toBe(expected);
   });
 
   it.each([
