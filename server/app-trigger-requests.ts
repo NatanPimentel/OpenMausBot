@@ -34,6 +34,7 @@ export interface AppTriggerRequestStore {
 const filterSchema = z.object({
   from: z.string().trim().max(200).optional(),
   subject: z.string().trim().max(200).optional(),
+  notSubject: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   label: z.string().trim().max(200).optional(),
   text: z.string().trim().max(200).optional(),
 }).strict();
@@ -71,7 +72,7 @@ type Described = Pick<AppTrigger, "app" | "event" | "eventName" | "accountLabel"
 /** When it fires, in English for the model: "When an email arrives in Gmail (sales) from acme.com (it checks every 15 minutes)". */
 export function appWhenText(trigger: Described): string {
   const filter = trigger.filter ?? {};
-  const details = [filter.from && `from ${filter.from}`, filter.subject && `about “${filter.subject}”`, filter.label && `labeled ${filter.label}`, filter.text && `mentioning “${filter.text}”`]
+  const details = [filter.from && `from ${filter.from}`, filter.subject && `about “${filter.subject}”`, filter.notSubject?.length && `not about ${filter.notSubject.map((term) => `“${term}”`).join(", ")}`, filter.label && `labeled ${filter.label}`, filter.text && `mentioning “${filter.text}”`]
     .filter(Boolean).join(" ");
   const account = trigger.accountLabel ? ` (${trigger.accountLabel})` : "";
   const when = trigger.event === "GMAIL_NEW_GMAIL_MESSAGE"
