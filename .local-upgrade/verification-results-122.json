@@ -1,0 +1,34 @@
+{
+  "catalog-goldens": {
+    "exit": 0,
+    "seconds": 7.49
+  },
+  "focused-tests": {
+    "exit": 0,
+    "seconds": 449.61
+  },
+  "server-typecheck-build": {
+    "exit": 0,
+    "seconds": 29.56
+  },
+  "server-bundle": {
+    "exit": 0,
+    "seconds": 0.96
+  },
+  "packaged-server-smoke": {
+    "exit": 0,
+    "seconds": 19.52
+  },
+  "ui-build": {
+    "exit": 0,
+    "seconds": 44.99,
+    "note": "vite com --max-old-space-size=4096 (1800 MB estoura)"
+  },
+  "tests": {
+    "files": 35,
+    "passed": 621,
+    "skipped": 1,
+    "failed": 0,
+    "workers": 1
+  }
+}
