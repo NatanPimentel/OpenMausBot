@@ -8,10 +8,14 @@ import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { join } from "node:path";
+import { createOpenBotDataHost, openBotDataErrorStatus } from "./openbot-data/host.ts";
+import { OpenBotDataError } from "./openbot-data/store.ts";
+import { OPENBOT_DATA_INTERNAL_PATH } from "./drivers/agents-openbot-data.ts";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
-import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
+import { boundedContextText, selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
+import { accountHandoffSummary, roundtripAccountHandoff } from "./ai-memory-handoff.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -763,6 +767,7 @@ let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+const openBotDataHost = createOpenBotDataHost(process.env.OMB_OPENBOT_DATA_PATH);
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
 const decorateHostedProvider = hostedModels ? (instance: ProviderInstance) => hostedModels.decorate(instance) : undefined;
@@ -4230,9 +4235,10 @@ const coordinator: Coordinator = createCoordinator({
       });
       if (group) store.patchGroup(group.id, { unread: true });
       else {
-        store.patchTask(parent.botId, parent.threadId, { unread: true });
+        const resultsPolled = !parent.parentId && parent.reply === "poll";
+        if (!resultsPolled) store.patchTask(parent.botId, parent.threadId, { unread: true });
         const source = store.bot(parent.botId);
-        if (source) markTaskContextExternallyUpdated(source, parent.threadId);
+        if (source) markTaskContextExternallyUpdated(source, parent.threadId, !resultsPolled);
       }
       const childTask = store.taskByThread(child.botId, child.threadId);
       if (!child.groupId && child.status === "completed" && !problem && !childTask?.closedBy && !coordinator.activeDirect(child.threadId)
@@ -7236,9 +7242,14 @@ bus.subscribe((event: RuntimeEvent) => {
         settlingTurns.add(event.threadId);
         liveTurnByThread.delete(event.threadId);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
-        if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
+        const routineNoUpdate = routineRun?.noUpdate === true;
+        if (routineNoUpdate) {
+          if (routineRun?.triggerSource === "webhook" && (!routineReportThread || routineReportThread !== event.threadId)) store.patchTask(bot.id, event.threadId, { unread: false, archivedAt: Date.now() });
+        } else if ((!routineReportThread || (routineRun?.triggerSource === "webhook" && routineReportThread !== event.threadId)) && (!internal || reviewAnswer)) {
+          store.patchTask(bot.id, event.threadId, { unread: true });
+        }
         if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
-        else if ((!routineRun || routineRun.status === "completed") && !internal && !computerSelectionTurns.get(event.threadId)?.selected) {
+        else if ((!routineRun || routineRun.status === "completed") && !internal && !routineNoUpdate && !computerSelectionTurns.get(event.threadId)?.selected) {
           notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }));
         }
         if (screenPollers.has(event.threadId)) {
@@ -7433,7 +7444,7 @@ function isExternalContextMarker(value: string | undefined): boolean {
   return Boolean(value?.startsWith(EXTERNAL_CONTEXT_MARKER_PREFIX));
 }
 
-function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): void {
+function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string, unread = true): void {
   const task = store.taskByThread(bot.id, threadId);
   if (!task) return;
   const owner = task.lastInstanceId;
@@ -7441,13 +7452,13 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
   if (owner && record?.session !== undefined && record.session === task.resumeCursors[owner] &&
     (botForThread(bot.id, threadId) ?? bot).modelSelection.instanceId === owner &&
     registry.get(owner)?.adapter.capabilities.strictResume) {
-    store.patchTask(bot.id, threadId, { unread: true });
+    store.patchTask(bot.id, threadId, unread ? { unread: true } : {});
     return;
   }
   store.patchTask(bot.id, threadId, {
     resumeCursors: {},
     lastInstanceId: `${EXTERNAL_CONTEXT_MARKER_PREFIX}${randomUUID()}`,
-    unread: true,
+    ...(unread ? { unread: true } : {}),
   });
 }
 
@@ -7484,15 +7495,16 @@ async function compactConversation(input: {
   bot: BotRecord; threadId: string; generation: string;
   instance: NonNullable<ReturnType<typeof registry.get>>; model: string;
   excludedIds: ReadonlySet<string>; manual: boolean;
+  accountHandoff?: { boundaryId: string; requestId: string };
 }): Promise<void> {
-  const { bot, threadId, generation, instance, model, excludedIds, manual } = input;
+  const { bot, threadId, generation, instance, model, excludedIds, manual, accountHandoff } = input;
   const task = store.taskByThread(bot.id, threadId);
-  if (!task || (!manual && cfg.context?.autoCompact === false)) return;
+  if (!task || (!manual && !accountHandoff && cfg.context?.autoCompact === false)) return;
   const messages = store.activePath(threadId);
   const context = directContext(bot, threadId, messages);
   const record = latestCompaction(messages);
   // A retry must apply the existing record before considering another fold.
-  if (!manual && record && record.id !== task.appliedCompactionId) return;
+  if (!manual && !accountHandoff && record && record.id !== task.appliedCompactionId) return;
   if (manual && record?.id === messages.at(-1)?.id && !record?.firstKeptId) return;
   const selected = selectReplay(context, {
     budgetBytes: Math.max(1_024, context.reduce((n, entry) => n + Buffer.byteLength(entry.text) + 16, 0) + 4 * MAX_SUMMARY_BYTES + 1_024),
@@ -7509,7 +7521,7 @@ async function compactConversation(input: {
     store.patchTask(bot.id, threadId, { contextFloor: floor });
   }
   const nativeCompactAt = nativeCompactTokens(instance);
-  if (!manual && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
+  if (!manual && !accountHandoff && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
     budget: compactBudget(window, cfg.context?.compactAt, nativeCompactAt), floor, window, nativeCompactAt })) return;
   const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
   if (!fold) return;
@@ -7517,20 +7529,40 @@ async function compactConversation(input: {
     ? context.findLast(entry => !excludedIds.has(entry.id))?.id
     : fold.folded.at(-1)?.id;
   if (!foldedThroughId) return;
+  const predecessor = accountHandoff && selected.compacted > 0 ? record : undefined;
+  let handoffSummary: string | null | undefined;
+  if (accountHandoff) {
+    handoffSummary = accountHandoffSummary(fold.folded, messages, predecessor);
+    if (handoffSummary === null) return;
+  }
   const prefix = JSON.stringify(messages);
   const controller = new AbortController();
   compactionControllers.set(threadId, { generation, controller });
   try {
-    const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText });
+    const summary = accountHandoff
+      ? task.cwd ? (await roundtripAccountHandoff({
+        schemaVersion: 1, source: "openmausbot", conversationId: `${bot.id}:${threadId}`,
+        boundaryId: accountHandoff.boundaryId, cwd: task.cwd, summary: handoffSummary!,
+      }, { signal: controller.signal }))?.text : undefined
+      : await draftSummary(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText });
     if (!directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
     controller.signal.throwIfAborted();
+    if (accountHandoff && (directRequestOwners.get(threadId)?.stopped || hasQueuedSteeredMessages(bot.id, threadId) ||
+        store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== accountHandoff.requestId)) {
+      throw new DirectTurnSetupCancelled("the request changed during the memory handoff");
+    }
     if (prefix !== JSON.stringify(store.activePath(threadId).slice(0, messages.length))) {
+      if (accountHandoff) throw new DirectTurnSetupCancelled("the conversation changed during the memory handoff");
       if (manual) throw new Error("the conversation changed during summarization — please retry");
       return;
     }
+    if (summary === undefined) return;
+    if (accountHandoff && Buffer.byteLength(summary) > MAX_SUMMARY_BYTES) return;
+    const storedSummary = boundedContextText(summary, MAX_SUMMARY_BYTES);
+    if (accountHandoff && predecessor && !storedSummary.includes(predecessor.summary)) return;
     store.appendMessage(threadId, {
       role: "bot", kind: "compaction",
-      compaction: { summary, firstKeptId: fold.firstKeptId, foldedThroughId,
+      compaction: { summary: storedSummary, firstKeptId: fold.firstKeptId, foldedThroughId,
         tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
     }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
   } finally {
@@ -7998,6 +8030,7 @@ async function startTurn(
     compactOnly?: boolean;
     automaticRecoveryAttempted?: boolean;
     automaticRecoveryIndex?: number;
+    accountHandoff?: { boundaryId: string; requestId: string };
     onTurnSettled?: () => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
   },
@@ -8229,7 +8262,8 @@ async function startTurn(
         if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
       }
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
-        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
+        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true,
+        accountHandoff: opts?.accountHandoff });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
       if (opts?.compactOnly) {
         clearDirectTurnDispatch(threadId, dispatchClaimId);
@@ -8985,7 +9019,7 @@ async function startTurn(
         ? current?.fallback?.length ? current.fallback : cfg.automaticRecovery.backup ? [cfg.automaticRecovery.backup] : []
         : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
-        registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId])
+        registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId], instanceConfigs(cfg)[instanceId])
           : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
         (candidate.instanceId !== instanceId || candidate.model !== model));
       const backup = backups[nextIndex];
@@ -8997,7 +9031,15 @@ async function startTurn(
         // No await between releasing the failed attempt and admitting its replacement: a newer send or Stop must never lose to a stale retry.
         store.setTaskActivity(bot.id, threadId, "idle");
         directTurnBots.delete(threadId);
-        const checked = checkedTaskModelSwitch(current, backup, false, false, true);
+        const backupEngine = registry.get(backup.instanceId);
+        const backupSelection: ModelSelection = backup;
+        const inheritClaudeEffort = process.env.OMB_CLAUDE_ACCOUNT_FAILOVER === "1" && instance.driverKind === "claudeAgent" && backupEngine?.driverKind === "claudeAgent" &&
+          backupSelection.model === current.modelSelection.model && backupSelection.effort === undefined && backupSelection.variant === undefined &&
+          current.modelSelection.effort !== undefined && backupEngine.adapter.capabilities.effortLevels?.includes(current.modelSelection.effort);
+        const checked = checkedTaskModelSwitch(current, {
+          ...backup,
+          ...(e instanceof TurnUsageLimitRefusedError && inheritClaudeEffort ? { effort: current.modelSelection.effort } : {}),
+        }, false, false, true);
         const target = checked.ok ? registry.get(checked.selection.instanceId) : null;
         const refusal = !checked.ok ? checked.error : !target || !target.enabled ? "The backup AI is unavailable."
           : !store.taskByThread(bot.id, threadId)?.cwd ? "This older thread has no pinned working folder. Choose its backup manually."
@@ -9017,7 +9059,10 @@ async function startTurn(
             if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
-              automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1 });
+              automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1,
+              accountHandoff: e instanceof TurnUsageLimitRefusedError && process.env.OMB_AI_MEMORY_HANDOFF_COMMAND &&
+                instance.driverKind === "claudeAgent" && target.driverKind === "claudeAgent" && target.instanceId !== instanceId && recoveryUserMessageId
+                ? { boundaryId: `${recoveryUserMessageId}:${target.instanceId}`, requestId: recoveryUserMessageId } : undefined });
             // The backup now owns these callbacks: publish no failed result and release no queued receipt in between.
             directFollowupSettlers.delete(dispatchClaimId);
             return;
@@ -9088,7 +9133,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     if (execution?.routineRunId === run.id) {
       store.patchTask(run.botId, execution.threadId, {
         routineRunId: undefined,
-        ...(["waiting", "completed", "failed", "missed"].includes(run.status) ? { unread: true } : {}),
+        ...(["waiting", "completed", "failed", "missed"].includes(run.status) && !run.noUpdate ? { unread: true } : {}),
       });
     }
     return null;
@@ -9120,7 +9165,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     }
   }
 
-  if (statusChanged && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
+  if (statusChanged && !run.noUpdate && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
     if (source.group) store.patchGroup(source.group.id, { unread: true });
     else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
   }
@@ -13878,6 +13923,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      if (path === OPENBOT_DATA_INTERNAL_PATH) {
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        try {
+          return json(res, 200, await openBotDataHost.handle(await readInternalBody(), {
+            botId: internalSender.id, assertActive: requireActiveInternalCapability,
+            allowSharedData: !cloudGuestDriven(internalCapability.threadId) && !cloudGuestDrivenHandoff(internalCapability.roomHandoffId),
+          }));
+        } catch (error) {
+          if (error instanceof OpenBotDataError) return json(res, openBotDataErrorStatus(error), { error: error.message, code: error.code });
+          throw error;
+        }
+      }
+      if (path === "/api/internal/routine-no-update") {
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        const body = await readInternalBody();
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+          return json(res, 400, { error: "No arguments are accepted." });
+        }
+        const run = activeRoutineRunForThread(internalCapability.threadId);
+        if (!run || run.botId !== internalSender.id) return json(res, 403, { error: "This is not an active routine run owned by this bot." });
+        requireActiveInternalCapability();
+        if (!routines?.markNoUpdate(run.id)) return json(res, 409, { error: "This routine run is not running." });
+        return json(res, 200, { ok: true });
+      }
       if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return; if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }), post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
