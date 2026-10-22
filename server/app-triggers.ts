@@ -73,6 +73,7 @@ export interface AppTriggerManagerOptions {
 const filterSchema = z.object({
   from: z.string().trim().max(APP_FILTER_MAX).optional(),
   subject: z.string().trim().max(APP_FILTER_MAX).optional(),
+  notSubject: z.array(z.string().trim().max(APP_FILTER_MAX)).max(20).optional(),
   label: z.string().trim().max(APP_FILTER_MAX).optional(),
   text: z.string().trim().max(APP_FILTER_MAX).optional(),
 }).strict();
@@ -163,8 +164,9 @@ const active = (status: string) => /^active$/i.test(status);
 function cleanFilter(filter: AppTriggerFilter | null | undefined): AppTriggerFilter | undefined {
   if (!filter) return undefined;
   const parsed = filterSchema.safeParse(filter);
-  if (!parsed.success) throw new AppTriggerError(`The filter takes from, subject, label and text, each at most ${APP_FILTER_MAX} characters.`);
-  const kept = Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value)) as AppTriggerFilter;
+  if (!parsed.success) throw new AppTriggerError(`The filter takes from, subject, notSubject (a list of up to 20 words), label and text, each at most ${APP_FILTER_MAX} characters.`);
+  const words = parsed.data.notSubject?.filter(Boolean);
+  const kept = Object.fromEntries(Object.entries({ ...parsed.data, notSubject: words }).filter(([, value]) => (Array.isArray(value) ? value.length : value))) as AppTriggerFilter;
   return Object.keys(kept).length ? kept : undefined;
 }
 

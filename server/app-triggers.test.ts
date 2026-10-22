@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appEventCatalog } from "./app-event-catalog.ts";
-import { eventCount } from "./app-events.ts";
+import { eventCount, matchesFilter } from "./app-events.ts";
+import { gmailSearchQuery } from "../shared/app-triggers.ts";
+import { appWhenText } from "./app-trigger-requests.ts";
 import { brokerClient } from "./app-trigger-broker.ts";
 import { AppTriggerManager, type AppTriggerManagerOptions } from "./app-triggers.ts";
 import { RoutineManager } from "./routines.ts";
@@ -137,6 +139,35 @@ describe("AppTriggerManager", () => {
     expect(runsOf(trigger.id)).toHaveLength(1);
     expect(runsOf(trigger.id)[0]!.prompt).toContain("the site is down");
     expect(triggers.get(trigger.id)).toMatchObject({ received: 1, filtered: 1 });
+  });
+
+  it("keeps out the titles on an exclusion list, and still lets an event with no title through", async () => {
+    const calendar = broker.account(owner.userId, "slack");
+    connected.slack = { connected: true, accounts: [{ id: calendar, status: "ACTIVE" }] };
+    const triggers = manager();
+    const trigger = await triggers.create({
+      botId: "bot-1", name: "Calls", prompt: "Follow the change.", app: "slack", event: "SLACK_CHANNEL_MESSAGE_RECEIVED",
+      filter: { notSubject: ["Ficha:", "Live", "Call - Mentoria", "MASTERCLASS", ""] as string[] },
+    });
+    expect(triggers.get(trigger.id)?.filter).toEqual({ notSubject: ["Ficha:", "Live", "Call - Mentoria", "MASTERCLASS"] });
+    for (const title of ["Ficha: Sessão Estratégica VGV10X | Natan e Ada", "Live - Aceleração Imobiliária +VGV", "Call - Mentoria de Aceleração", "MASTERCLASS - VGV TURBINADO"]) {
+      await broker.deliver(trigger.remote.triggerId!, { summary: title });
+    }
+    await broker.deliver(trigger.remote.triggerId!, { summary: "Sessão Estratégica VGV10X | Natan e Adriana Oliveira" });
+    await broker.deliver(trigger.remote.triggerId!, { status: "cancelled", id: "evt_9" });
+    await drain(triggers);
+    const prompts = runsOf(trigger.id).map((run) => run.prompt).join("\n");
+    expect(prompts).toContain("Adriana Oliveira");
+    expect(prompts).toContain("evt_9");
+    expect(prompts).not.toMatch(/Ficha:|Live - |Call - Mentoria|MASTERCLASS/);
+    expect(triggers.get(trigger.id)).toMatchObject({ received: 2, filtered: 4 });
+  });
+
+  it("drops an empty exclusion list instead of storing it", async () => {
+    const triggers = manager();
+    const trigger = await gmailTrigger(triggers, { from: "acme.com", notSubject: [] } as never);
+    expect(triggers.get(trigger.id)?.filter).toEqual({ from: "acme.com" });
+    await expect(triggers.update(trigger.id, { filter: { notSubject: new Array(21).fill("x") } })).rejects.toThrow(/notSubject/);
   });
 
   it("reconciles: a lost copy is made again, one nobody wants is removed, and on/off is matched", async () => {
@@ -314,5 +345,32 @@ describe("instructions in the person's words", () => {
       .toContain("in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\"");
     expect(eventPrompt("Draft a reply.", "[UNTRUSTED APP EVENT DATA]\n{}\n[/UNTRUSTED APP EVENT DATA]"))
       .toContain("The email, message or record these instructions mean is in the UNTRUSTED APP EVENT DATA below.");
+  });
+});
+
+describe("exclusion filter", () => {
+  const slack = (title: unknown) => ({ title });
+
+  it("matches whole words, any case, and phrases with punctuation", () => {
+    const filter = { notSubject: ["live", "Ficha:", "Call - Mentoria"] };
+    expect(matchesFilter("slack", filter, slack("LIVE - Aceleração"))).toBe(false);
+    expect(matchesFilter("slack", filter, slack("Reunião ao vivo e Live"))).toBe(false);
+    expect(matchesFilter("slack", filter, slack("Ficha: Sessão"))).toBe(false);
+    expect(matchesFilter("slack", filter, slack("call - mentoria de aceleração"))).toBe(false);
+    expect(matchesFilter("slack", filter, slack("Sessão com Adriana Oliveira"))).toBe(true);
+    expect(matchesFilter("slack", filter, slack("Alive and kicking"))).toBe(true);
+  });
+
+  it("does not hold back an event with no title, but still needs the plain fields", () => {
+    expect(matchesFilter("slack", { notSubject: ["Live"] }, { status: "cancelled", id: "e1" })).toBe(true);
+    expect(matchesFilter("slack", { notSubject: ["Live"], subject: "Sessão" }, { status: "cancelled", id: "e1" })).toBe(false);
+    expect(matchesFilter("slack", { notSubject: ["Live"], subject: "Sessão" }, slack("Sessão Estratégica"))).toBe(true);
+    expect(matchesFilter("slack", { notSubject: ["Live"], subject: "Sessão" }, slack("Live: Sessão"))).toBe(false);
+  });
+
+  it("folds into Gmail's own search and into the sentence the bot reads", () => {
+    expect(gmailSearchQuery({ from: "acme.com", notSubject: ["Ficha:", "Call - Mentoria"] })).toBe('from:acme.com -subject:Ficha: -subject:"Call - Mentoria"');
+    expect(appWhenText({ app: "slack", event: "X", eventName: "A message", delivery: "instant", filter: { notSubject: ["Live", "Ficha:"] } }))
+      .toContain("not about “Live”, “Ficha:”");
   });
 });
