@@ -560,6 +560,14 @@ export function attentionRows(since: number): AttentionRow[] {
   ).all(since, since, since) as unknown as AttentionRow[];
 }
 
+/** Every card a bot put in front of the person, oldest first: open ones never age out of Needs you. */
+export function optionCardRows(): Array<{ threadId: string; id: string; at: number; fromBotId: string | null; card: string }> {
+  return db().prepare(
+    "SELECT thread_id AS threadId, id, at, json_extract(json, '$.from.botId') AS fromBotId, json_extract(json, '$.card') AS card " +
+    `FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND json_extract(json, '$.card') IS NOT NULL ORDER BY at`,
+  ).all() as Array<{ threadId: string; id: string; at: number; fromBotId: string | null; card: string }>;
+}
+
 /** Successful tool calls after a time whose row mentions `word` (case-insensitive), newest last. */
 export function successfulCallsMentioning(since: number, word: string): Array<{ at: number; name: string; input: string | null }> {
   return db().prepare(
