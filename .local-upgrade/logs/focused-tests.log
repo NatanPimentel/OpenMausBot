@@ -1,9 +1,9 @@
 
- RUN  v4.1.11 /home/natan/orca/workspaces/OpenMausBot/omb-0122-mod
+ RUN  v4.1.11 /home/natan/orca/workspaces/OpenMausBot/omb-0125-mod
 
 
- Test Files  35 passed (35)
-      Tests  621 passed | 1 skipped (622)
-   Start at  12:49:27
-   Duration  448.90s (transform 4.17s, setup 8.54s, import 10.80s, tests 422.72s, environment 5ms)
+ Test Files  42 passed (42)
+      Tests  725 passed | 1 skipped (726)
+   Start at  15:05:56
+   Duration  456.06s (transform 3.38s, setup 6.76s, import 8.26s, tests 435.19s, environment 5ms)
 

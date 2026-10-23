@@ -1,4 +1,4 @@
-packaged server started with no node_modules in reach (port 33063) ✓
+packaged server started with no node_modules in reach (port 32965) ✓
 all 13 spawned proxy paths resolve inside the packaged server dir ✓
 packaged MCP stdio server reached the API and flushed its final frames ✓
 packaged openmausbot doctor and bots answered from the bundle ✓
