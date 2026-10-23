@@ -55,6 +55,8 @@ TESTS = sys.argv[0] and [
     # rodada 3: pagina Precisa de voce (needs-you), assuntos, resposta aos cartoes
     'server/needs-you.test.ts', 'server/needs-you.e2e.test.ts', 'server/question-subjects.test.ts', 'src/lib/needs-you.test.ts',
     'server/card-answerers.e2e.test.ts', 'src/components/lazy-screens.test.ts',
+    # rodada 4: "Ja respondi" (descartar) e respondida na conversa
+    'src/lib/i18n.test.ts',
 ]
 run('focused-tests', vitest + TESTS)
 run('server-typecheck-build', [node, 'node_modules/typescript/lib/tsc.js', '-p', 'tsconfig.server.build.json'])

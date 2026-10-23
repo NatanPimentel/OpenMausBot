@@ -5938,5 +5938,12 @@
   "needsYou.byYou": "Sua resposta",
   "needsYou.empty.title": "Nada esperando você",
   "needsYou.empty.body": "Quando um bot precisar de uma decisão sua, ela aparece aqui, uma linha por assunto, até você responder ou o bot resolver.",
-  "needsYou.loadFailed": "Não deu para carregar. Tento de novo em instantes."
+  "needsYou.loadFailed": "Não deu para carregar. Tento de novo em instantes.",
+  "needsYou.dismiss": "Já respondi",
+  "needsYou.dismissHint": "Tira da lista sem enviar nada ao bot",
+  "needsYou.dismissedToast": "Marcada como já respondida",
+  "needsYou.undo": "Desfazer",
+  "needsYou.dismissFailed": "Não deu para tirar da lista. Ela voltou; tente de novo ou abra a conversa.",
+  "needsYou.viaDismissed": "Descartada: você já tinha respondido",
+  "needsYou.viaConversation": "Respondida na conversa"
 }

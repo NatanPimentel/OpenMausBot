@@ -37,10 +37,14 @@ it("lists a subject two bots asked once, and one answer settles every card and t
   const answered = join(gates, "answered.json");
   writeFileSync(join(bin, "pedir-natan"), `#!${process.execPath}
 const { DatabaseSync } = require("node:sqlite");
-const [, , verb, id, text] = process.argv;
-require("node:fs").writeFileSync(${JSON.stringify(answered)}, JSON.stringify({ verb, id, text }));
+const args = process.argv.slice(2);
+const verb = args[0];
+const by = verb === "resolver" ? args[2] : undefined;
+const [id, text] = verb === "resolver" ? args.slice(3) : args.slice(1);
+require("node:fs").writeFileSync(${JSON.stringify(answered)}, JSON.stringify({ verb, id, text, ...(by ? { by } : {}) }));
+const answer = verb === "resolver" ? { texto: "resolvido por " + by + ": " + text, resolvido: true } : { texto: text };
 new DatabaseSync(${JSON.stringify(join(state, "pedidos.db"))}).prepare("UPDATE pedidos SET estado = 'respondido', resposta = ?, respondido_em = ? WHERE id = ?")
-  .run(JSON.stringify({ texto: text }), new Date().toISOString(), id);
+  .run(JSON.stringify(answer), new Date().toISOString(), id);
 `);
   chmodSync(join(bin, "pedir-natan"), 0o755);
 
@@ -109,6 +113,36 @@ new DatabaseSync(${JSON.stringify(join(state, "pedidos.db"))}).prepare("UPDATE p
     await expect.poll(async () => (await page()).settled.map((settled: any) => settled.how), { timeout: 10_000 }).toEqual(["Mando eu mesmo", answer]);
     expect((await page()).subjects.map((subject: any) => subject.id)).toEqual([funnel.ids[1]]);
     expect((await api("POST", "/api/needs-you/pedidos", { ids: ["47ac81ef"], text: "again" })).status).toBe(409);
+
+    // "Already answered": the proposal both bots asked closes everywhere, with no answer and no new turn.
+    const proposal = await ask("Hormozi · Renovação", [STALLED_PROPOSAL[1]!]);
+    const pending = (await page()).subjects.find((subject: any) => subject.id === funnel.ids[1]);
+    expect(pending.answer.cards).toEqual([{ threadId: funnel.threadId, requestId: funnel.ids[1] }, { threadId: proposal.threadId, requestId: proposal.ids[0] }]);
+    const said = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages`)).body.messages.filter((message: any) => message.role === "user").length;
+    const saidBefore = [await said(funnel.threadId), await said(proposal.threadId)];
+    const dismissed = await api("POST", "/api/needs-you/dismiss", { ids: [pending.id], cards: [pending.answer.cards[0]], pedidos: [] });
+    expect(dismissed, JSON.stringify(dismissed.body)).toMatchObject({ status: 200, body: { dismissed: 2, failed: [] } });
+    for (const [threadId, requestId] of [[funnel.threadId, funnel.ids[1]], [proposal.threadId, proposal.ids[0]]]) {
+      const card = (await api("GET", `/api/threads/${threadId}/messages`)).body.messages.find((message: any) => message.card?.requestId === requestId).card;
+      expect(card).toMatchObject({ dismissed: true, answeredBy: { at: expect.any(Number), dismissed: true } });
+      expect(card.answeredText).toBeUndefined();
+    }
+    expect([await said(funnel.threadId), await said(proposal.threadId)]).toEqual(saidBefore);
+    const settledNow = await page();
+    expect(settledNow.count).toBe(0);
+    expect(settledNow.settled[0]).toMatchObject({ id: funnel.ids[1], via: "dismissed" });
+
+    // A request with no card is resolved through pedir-natan, so its asker stops waiting.
+    const later = new DatabaseSync(join(state, "pedidos.db"));
+    later.prepare("INSERT INTO pedidos VALUES (?, ?, ?, ?, ?, ?, ?, 'novo', NULL, NULL)")
+      .run("5eed0001", new Date().toISOString(), "Funil (Brunson)", "Reenvio do boleto", "", JSON.stringify(["Reenviar", "Esperar"]), 0);
+    later.close();
+    expect((await page()).count).toBe(1);
+    expect((await api("POST", "/api/needs-you/dismiss", { ids: ["pedido:5eed0001"], cards: [], pedidos: [] })).body).toEqual({ dismissed: 1, failed: [] });
+    expect(JSON.parse(readFileSync(answered, "utf8"))).toEqual({ verb: "resolver", by: "Natan", id: "5eed0001", text: expect.stringContaining("Precisa de você") });
+    const resolved = await page();
+    expect(resolved.count).toBe(0);
+    expect(resolved.settled[0]).toMatchObject({ id: "pedido:5eed0001", via: "dismissed" });
   } finally {
     writeFileSync(release, "");
     for (const socket of sockets) socket.destroy();

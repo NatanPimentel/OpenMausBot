@@ -111,7 +111,7 @@ import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
-import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
+import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
@@ -241,7 +241,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
-import { optionCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt } from "./message-db.ts";
+import { optionCardRows, personMessageTimes, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
@@ -623,7 +623,7 @@ import { createStatusRoutes } from "./routes/status.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
 import { createNotificationRoutes } from "./routes/notifications.ts";
-import { createTodayRoutes } from "./routes/today.ts"; import { createNeedsYouRoutes } from "./routes/needs-you.ts"; import { createPedirNatan } from "./pedir-natan.ts"; import { createSidebarSectionRoutes } from "./routes/sidebar-sections.ts";
+import { createTodayRoutes } from "./routes/today.ts"; import { createNeedsYouRoutes } from "./routes/needs-you.ts"; import { createHiddenRows } from "./needs-you.ts"; import { createPedirNatan } from "./pedir-natan.ts"; import { createSidebarSectionRoutes } from "./routes/sidebar-sections.ts";
 import { createToolTimingRoute, createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
 import { createReactionRoutes } from "./routes/reactions.ts";
@@ -5306,6 +5306,23 @@ async function respondToCard(input: {
     }
   }, via);
   return result;
+}
+
+/** "Already answered" on Needs you: the card closes without an answer and no turn starts. A turn still waiting on it goes on
+ * the way it does when the card's own close button is used. */
+async function dismissNeedsYouCard(auth: RequestAuth, askedIn: string, requestId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const threadId = automationReports.answeredIn(askedIn, requestId);
+  const refusal = cardAnswerRefusal(auth, askedIn, requestId, "answer") ?? cardAnswerRefusal(auth, threadId, requestId, "answer");
+  if (refusal) return { ok: false, error: refusal };
+  const bot = store.botByThread(threadId);
+  const message = store.messagesFor(threadId).find((candidate) => candidate.card?.requestId === requestId);
+  if (!bot || !message?.card || !isPersistentQuestionCard(message.card)) return { ok: false, error: "This question is no longer available." };
+  if (message.card.answered || message.card.dismissed || message.card.expired) return { ok: true };
+  await answerRequest(threadId, botForThread(bot.id, threadId)?.modelSelection.instanceId ?? "", requestId, "answer", QUESTION_DISMISS_MESSAGE, { id: bot.id, name: bot.name });
+  const card = store.messagesFor(threadId).find((candidate) => candidate.id === message.id)?.card ?? message.card;
+  const { answeredText: _answeredText, ...rest } = card;
+  store.patchMessage(threadId, message.id, { card: { ...rest, answered: "answer", dismissed: true, answeredBy: { ...cardAnswererFor(auth), at: Date.now(), dismissed: true } } });
+  return { ok: true };
 }
 
 function closeOpenApprovals(threadId: string): void {
@@ -13152,9 +13169,11 @@ if (CLOUD_TEAM) teamHost.adoptServerProfile(sessions.list().flatMap((session) =>
 ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }), createPresenceRoutes({ isOwner: ownerOrAdmin, active: (source, zone) => proactive.brief.active(source, zone) }), createMeRoutes({ team: CLOUD_TEAM, session: (auth) => (auth.kind === "session" ? auth.session : null), profile: teamHost.memberProfile, save: teamHost.saveMemberProfile, seed: teamHost.seedMemberProfile, seeded: teamHost.seededFields, changed: () => broadcast({ kind: "config", ...configStatus() }) }), createTeamPhoneRoutes({ team: CLOUD_TEAM, sessions, publicBase: (req, auth) => publicUrl() ?? (auth.kind === "session" ? requestOrigin(req) : null) }),
   createTeamConnectionRoutes({ host: teamConnections, cfg: () => cfg, composio, publicOrigin: CLOUD_HOME?.publicOrigin ?? null, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), createSignInCardRoutes({ settle: settleSignIn, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
 ROUTES.push(createNeedsYouRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), pedirNatan: createPedirNatan(), log: (line) => console.warn(line),
+  dismissCard: dismissNeedsYouCard, hidden: createHiddenRows(join(DATA_DIR, "needs-you-hidden.json")),
   sources: (auth) => {
     const visible = visibleTo(viewerFor(auth));
-    return { cards: optionCardRows(), bots: store.bots.map((bot) => ({ id: bot.id, name: bot.name })), ownerOf: (threadId) => store.botByThread(threadId)?.id,
+    const said = personMessageTimes();
+    return { cards: optionCardRows(), personSaidAt: (threadId) => said.get(threadId), bots: store.bots.map((bot) => ({ id: bot.id, name: bot.name })), ownerOf: (threadId) => store.botByThread(threadId)?.id,
       others: needsYouNow({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) },
         { admin: auth.scopes.includes("admin"), thread: (threadId) => visible.thread(threadId), routine: (run) => routineVisible(run, visible) }) };
   } }));

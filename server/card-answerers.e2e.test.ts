@@ -144,6 +144,9 @@ posixOnly("who may answer a card on a shared workspace", () => {
       expect(refused.status, path).toBe(403);
       expect(refused.body.error).toMatch(refusal);
     }
+    // "Already answered" on Needs you hides rows for the whole workspace: a member cannot use it to close anyone's card.
+    const dismissed = await api("POST", "/api/needs-you/dismiss", { ids: [], cards: [{ threadId: bot.threadId, requestId }], pedidos: [] }, BOB);
+    expect(dismissed, JSON.stringify(dismissed.body)).toMatchObject({ status: 403 });
     expect((await openCard(bot.threadId))?.card.requestId).toBe(requestId);
 
     const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId, behavior: "allow" }, ADA);

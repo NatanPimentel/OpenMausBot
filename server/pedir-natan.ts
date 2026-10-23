@@ -27,6 +27,8 @@ export interface Pedido {
 export interface PedirNatan {
   pedidos(): Pedido[];
   answer(id: string, text: string): Promise<void>;
+  /** `pedir-natan resolver`: the request leaves the queue, and its asker reads "resolvido por <by>: <how>". */
+  resolve(id: string, by: string, how: string): Promise<void>;
 }
 
 const ANSWER_TIMEOUT_MS = 240_000;
@@ -58,6 +60,7 @@ export function createPedirNatan(options: {
       }
     },
     answer: (id, text) => run(command, ["responder", id, text], ANSWER_TIMEOUT_MS),
+    resolve: (id, by, how) => run(command, ["resolver", "--por", by, id, how], ANSWER_TIMEOUT_MS),
   };
 }
 

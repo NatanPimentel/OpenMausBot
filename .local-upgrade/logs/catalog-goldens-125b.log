@@ -4,6 +4,6 @@
 
  Test Files  2 passed (2)
       Tests  69 passed (69)
-   Start at  20:07:22
-   Duration  5.09s (transform 485ms, setup 710ms, import 175ms, tests 3.86s, environment 0ms)
+   Start at  20:53:29
+   Duration  7.20s (transform 1.67s, setup 1.87s, import 280ms, tests 10.39s, environment 0ms)
 

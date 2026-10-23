@@ -1,8 +1,10 @@
 // The Needs you page: every open question card, approval and pedir-natan
 // request across the bots, one row per subject however many bots asked it.
+import { existsSync, readFileSync } from "node:fs";
 import { isPersistentQuestionCard } from "../shared/ask-question.ts";
 import type { NeedsYouAsker, NeedsYouPage, NeedsYouSettled, NeedsYouSubject } from "../shared/needs-you.ts";
 import type { NeedsYouItem } from "../shared/today.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { pedidoOf, PEDIDO_FOOTER, type Pedido } from "./pedir-natan.ts";
 import { SAME_ASKER_SUBJECT, SAME_SUBJECT, subjectCorpus, subjectSimilarity, subjectWeights, withoutAccents, type SubjectCorpus, type SubjectWeights } from "./question-subjects.ts";
 
@@ -17,7 +19,7 @@ export interface NeedsYouCardRow {
 type Card = Parameters<typeof isPersistentQuestionCard>[0] & {
   title?: string; subtitle?: string; options?: unknown; requestId?: string; answered?: string; answeredText?: string;
   dismissed?: boolean; expired?: boolean; autoApplied?: boolean; outboundRequest?: unknown; quotaSwitch?: unknown; teamMemoryRequest?: unknown;
-  answeredBy?: { kind?: string; name?: string; at?: number };
+  answeredBy?: { kind?: string; name?: string; at?: number; dismissed?: boolean };
   questionRequest?: { questions?: Array<{ question?: string }> };
 };
 
@@ -32,6 +34,18 @@ export interface NeedsYouSources {
   others: readonly NeedsYouItem[];
   /** pedir-natan requests an answer is on its way to. */
   answering: ReadonlySet<string>;
+  /** When the person last wrote in a conversation themselves (not a routine, a trigger, a tool or another bot). */
+  personSaidAt?(threadId: string): number | undefined;
+  /** Rows the person marked "already answered" that have no card to close, by `hiddenKey`. */
+  hidden?: ReadonlyMap<string, NeedsYouHidden>;
+}
+
+/** What a hidden row showed, for "Settled today". */
+export interface NeedsYouHidden {
+  at: number;
+  text: string;
+  askers: NeedsYouAsker[];
+  open?: { botId?: string; threadId: string };
 }
 
 interface Unit {
@@ -43,13 +57,22 @@ interface Unit {
   asker: NeedsYouAsker;
   pedido?: string;
   card?: { threadId: string; requestId: string; botId?: string };
-  settled?: { at: number; how: string; byPerson: boolean; byBot: boolean };
+  settled?: Settlement;
 }
+
+interface Settlement { at: number; how: string; byPerson: boolean; byBot: boolean; via?: NeedsYouSettled["via"] }
 
 /** pergunta-registro's words when it closes a duplicate card: the subject stays open on the card it points to. */
 const DUPLICATE_CLOSE = /^(?:Duplicad[oa]|Respondido pelo Natan em)/u;
 const KIND_ORDER: Record<NeedsYouSubject["kind"], number> = { setup: 0, question: 1, waiting: 1, approval: 1 };
 const shortName = (name: string) => name.split(" ·")[0]!.trim();
+/** The line "Already answered" leaves on a pedir-natan request it resolves. */
+export const DISMISSED_PEDIDO_BY = "Natan";
+export const DISMISSED_PEDIDO_LINE = "já respondido (descartado em Precisa de você)";
+const DISMISSED_PEDIDO = new RegExp(`^resolvid[oa] por ${DISMISSED_PEDIDO_BY}:`, "u");
+
+/** One occurrence of a row without a card: the same sign-in failing again tomorrow is a new row. */
+export const hiddenKey = (subject: Pick<NeedsYouSubject, "kind" | "id" | "since">) => `${subject.kind}:${subject.id}:${subject.since}`;
 
 export function needsYouPage(sources: NeedsYouSources, since: number): NeedsYouPage {
   const pedidos = new Map(sources.pedidos.map((pedido) => [pedido.id, pedido]));
@@ -87,15 +110,19 @@ export function needsYouPage(sources: NeedsYouSources, since: number): NeedsYouP
     const footer = pedidoOf(question);
     const pedido = footer ? pedidos.get(footer.id) : undefined;
     const answeredAt = card.answeredBy?.at;
+    // A pedir-natan copy waits on its request, which an aside in the same conversation does not settle.
+    const saidAt = open && !footer ? sources.personSaidAt?.(row.threadId) : undefined;
     let settled: Unit["settled"];
     if (open && pedido && !pedido.open) settled = settledPedido(pedido);
+    else if (open && saidAt !== undefined && saidAt > row.at) settled = { at: saidAt, how: "", byPerson: true, byBot: false, via: "conversation" };
+    else if (!open && card.answeredBy?.dismissed && answeredAt !== undefined) settled = { at: answeredAt, how: "", byPerson: true, byBot: false, via: "dismissed" };
     else if (!open && card.answered === "answer" && answeredAt !== undefined) {
       settled = settledCard(card.answeredText ?? "", answeredAt, (card.answeredBy?.name ?? "").endsWith("(CLI)"));
     }
+    if (open) cardIds.add(row.id);
     if (open && footer && sources.answering.has(footer.id)) continue;
     if (!open && !settled) continue;
     if (settled && settled.at < since) continue;
-    if (open) cardIds.add(row.id);
     const asker = footer ? (botNamed(footer.origin) ? askerFor(botNamed(footer.origin), row.threadId) : { name: footer.origin, threadId: row.threadId }) : askerFor(owner, row.threadId);
     units.push({
       key: card.requestId, at: row.at, text: question.replace(PEDIDO_FOOTER, "").trim(), options, weights, asker,
@@ -132,13 +159,15 @@ export function needsYouPage(sources: NeedsYouSources, since: number): NeedsYouP
         answer: {
           cards: waiting.flatMap((unit) => unit.card ? [{ threadId: unit.card.threadId, requestId: unit.card.requestId }] : []),
           pedidos: waiting.flatMap((unit) => !unit.card && unit.pedido ? [unit.pedido] : []),
+          everyPedido: [...new Set(waiting.flatMap((unit) => unit.pedido ? [unit.pedido] : []))],
         } });
       continue;
     }
     const answered = group.filter((unit) => unit.settled!.at >= since);
     const told = answered.filter((unit) => unit.settled!.byPerson || unit.settled!.byBot).sort((a, b) => b.settled!.at - a.settled!.at)[0];
     if (!told) continue;
-    settled.push({ id: first.key, at: told.settled!.at, askers, text: first.text, how: told.settled!.how, resolvedByBot: told.settled!.byBot, ...opening });
+    const via = told.settled!.via;
+    settled.push({ id: first.key, at: told.settled!.at, askers, text: first.text, how: told.settled!.how, resolvedByBot: told.settled!.byBot, ...(via ? { via } : {}), ...opening });
   }
 
   for (const item of sources.others) {
@@ -152,9 +181,31 @@ export function needsYouPage(sources: NeedsYouSources, since: number): NeedsYouP
       ...(item.threadId ? { open: { ...(item.botIds[0] ? { botId: item.botIds[0] } : {}), threadId: item.threadId } } : {}) });
   }
 
-  subjects.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.since - b.since);
+  for (const [key, row] of sources.hidden ?? []) {
+    if (row.at >= since) settled.push({ id: key, at: row.at, askers: row.askers, text: row.text, how: "", resolvedByBot: false, via: "dismissed", ...(row.open ? { open: row.open } : {}) });
+  }
+  const shown = sources.hidden?.size ? subjects.filter((subject) => subject.kind === "question" || !sources.hidden!.has(hiddenKey(subject))) : subjects;
+  shown.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.since - b.since);
   settled.sort((a, b) => b.at - a.at);
-  return { count: subjects.length, subjects, settled };
+  return { count: shown.length, subjects: shown, settled };
+}
+
+const HIDDEN_KEPT_MS = 30 * 24 * 60 * 60_000;
+
+/** Rows marked "already answered" that have no card to close, in a small file beside the data; a month later they are forgotten. */
+export function createHiddenRows(file: string, now: () => number = Date.now): { all(): ReadonlyMap<string, NeedsYouHidden>; add(key: string, row: NeedsYouHidden): void } {
+  const rows = new Map<string, NeedsYouHidden>();
+  try {
+    if (existsSync(file)) for (const [key, row] of Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, NeedsYouHidden>)) rows.set(key, row);
+  } catch { /* An unreadable file only brings the rows back. */ }
+  return {
+    all: () => rows,
+    add(key, row) {
+      rows.set(key, row);
+      for (const [old, kept] of rows) if (now() - kept.at > HIDDEN_KEPT_MS) rows.delete(old);
+      writeFileAtomic(file, `${JSON.stringify(Object.fromEntries(rows))}\n`, { mode: 0o600 });
+    },
+  };
 }
 
 /** Questions are one subject when they settle the same pedido, read alike, or read nearly alike from the same bot. */
@@ -189,6 +240,7 @@ function settledCard(answer: string, at: number, byTool: boolean): Unit["settled
 
 function settledPedido(pedido: Pedido): Unit["settled"] {
   if (pedido.open || pedido.answeredAt === undefined) return undefined;
+  if (pedido.resolved && DISMISSED_PEDIDO.test(pedido.answer ?? "")) return { at: pedido.answeredAt, how: "", byPerson: true, byBot: false, via: "dismissed" };
   return { at: pedido.answeredAt, how: pedido.answer ?? "", byPerson: !pedido.resolved && !DUPLICATE_CLOSE.test(pedido.answer ?? ""), byBot: pedido.resolved === true };
 }
 

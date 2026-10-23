@@ -424,6 +424,8 @@ export type CardAnswerer = (
   via?: "call" | "reaction";
   /** When it was answered (epoch ms); absent on cards answered before this was recorded. */
   at?: number;
+  /** Closed from Needs you as already answered elsewhere: no answer reached the bot. */
+  dismissed?: true;
 };
 
 /** One transcript line, serialized as stored. */

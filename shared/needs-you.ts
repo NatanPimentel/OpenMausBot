@@ -13,6 +13,8 @@ export interface NeedsYouAsker {
 export interface NeedsYouAnswerTargets {
   cards: Array<{ threadId: string; requestId: string }>;
   pedidos: string[];
+  /** Every pedir-natan request on the subject, with a card or not: "Already answered" resolves each, so no bot keeps waiting. */
+  everyPedido: string[];
 }
 
 export type NeedsYouSubject = {
@@ -42,6 +44,8 @@ export interface NeedsYouSettled {
   /** The answer, or the bot's own "resolved by <bot>: <how>" line. */
   how: string;
   resolvedByBot: boolean;
+  /** "dismissed": the person said they already answered it elsewhere; "conversation": they wrote in its conversation after it was asked. */
+  via?: "dismissed" | "conversation";
   open?: { botId?: string; threadId: string };
 }
 
@@ -56,5 +60,17 @@ export interface NeedsYouPage {
 export interface NeedsYouAnswerResult {
   /** Cards and pedir-natan requests the answer reached, and the ones it could not. */
   delivered: number;
+  failed: Array<{ target: string; error: string }>;
+}
+
+/** "Already answered": closes every target without an answer, and hides the other rows by their subject id. */
+export interface NeedsYouDismissRequest {
+  ids: string[];
+  cards: Array<{ threadId: string; requestId: string }>;
+  pedidos: string[];
+}
+
+export interface NeedsYouDismissResult {
+  dismissed: number;
   failed: Array<{ target: string; error: string }>;
 }

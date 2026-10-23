@@ -568,6 +568,16 @@ export function optionCardRows(): Array<{ threadId: string; id: string; at: numb
   ).all() as Array<{ threadId: string; id: string; at: number; fromBotId: string | null; card: string }>;
 }
 
+/** When the person last wrote in each conversation: a message they sent, not a routine, trigger, tool (CLI) or another bot. */
+export function personMessageTimes(): Map<string, number> {
+  const rows = db().prepare(
+    "SELECT thread_id AS threadId, MAX(at) AS at FROM messages WHERE role = 'user' " +
+    "AND (json_extract(json, '$.sendId') IS NOT NULL OR json_extract(json, '$.sender') IS NOT NULL) AND json_extract(json, '$.peerAsk') IS NULL " +
+    "AND COALESCE(json_extract(json, '$.sender.name'), '') NOT LIKE '%(CLI)' GROUP BY thread_id",
+  ).all() as Array<{ threadId: string; at: number }>;
+  return new Map(rows.map((row) => [row.threadId, row.at]));
+}
+
 /** Successful tool calls after a time whose row mentions `word` (case-insensitive), newest last. */
 export function successfulCallsMentioning(since: number, word: string): Array<{ at: number; name: string; input: string | null }> {
   return db().prepare(

@@ -6201,5 +6201,12 @@
   "needsYou.byYou": "Your answer",
   "needsYou.empty.title": "Nothing is waiting on you",
   "needsYou.empty.body": "When a bot needs a decision from you, it shows up here, one row per subject, until you answer it or the bot resolves it.",
-  "needsYou.loadFailed": "Couldn't load. Trying again in a moment."
+  "needsYou.loadFailed": "Couldn't load. Trying again in a moment.",
+  "needsYou.dismiss": "Already answered",
+  "needsYou.dismissHint": "Takes it off the list without sending the bot anything",
+  "needsYou.dismissedToast": "Marked as already answered",
+  "needsYou.undo": "Undo",
+  "needsYou.dismissFailed": "Couldn't take it off the list. It's back; try again or open the conversation.",
+  "needsYou.viaDismissed": "Dismissed: you had already answered",
+  "needsYou.viaConversation": "Answered in the conversation"
 }
