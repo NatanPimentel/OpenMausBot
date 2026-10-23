@@ -57,8 +57,8 @@ import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
-import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
+import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexPatchProgress } from "./tool-progress.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -746,13 +746,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // schemaValidation), and Codex does not speak SSE. A plan turn has no tool_search, so its URL
           // servers use the proxy's tool directory.
           const directory = plan && "url" in server;
-          if (turn.toolScope === undefined && !("url" in server)) return server;
+          const apps = appMountFor(name, turn);
+          if (turn.toolScope === undefined && !("url" in server) && !apps) return server;
           const hash = createHash("sha256").update(mountName).digest("hex");
           // Codex starts MCP children with only a few env names.
-          const proxy = turn.toolScope === undefined
-            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env })
-            : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-              configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env });
+          const proxy = turn.toolScope === undefined && "url" in server
+            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env, apps })
+            : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env, apps });
           if (proxy && directory) directoryMounts.add(mountName);
           if (!proxy) return null;
           const shared = { ...proxy.env };
@@ -772,9 +772,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             if (turn.toolScope !== undefined && approval === "prompt") appServerArgs.push("-c", `mcp_servers.${mountName}.default_tools_approval_mode="prompt"`);
           }
         };
-        if (turn.integrations?.composio) {
-          mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
-        }
+        if (turn.integrations?.composio) mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
+        if (turn.integrations?.composioOwn) mountSelected(OWN_APPS_SERVER, `openmausbot_${OWN_APPS_SERVER}`, turn.integrations.composioOwn);
         if (turn.integrations?.agents) {
           // OpenMausBot's own coordination tools never ask: "auto" quiets only read-only tools.
           mountSelected("agents", "agents", turn.integrations.agents, "approve");
@@ -1121,11 +1120,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           emit({ ...base(threadId, turnId), type: "request.resolved", requestId, behavior, source });
         };
-        const timer = setTimeout(
-          () => finish("deny", isQuestion ? undefined : DENY_TIMEOUT_NOTE, "timeout"),
-          15 * 60_000,
-        );
-        timer.unref?.();
+        const timer = isQuestion ? undefined : setTimeout(() => finish("deny", DENY_TIMEOUT_NOTE, "timeout"), 15 * 60_000);
+        timer?.unref?.();
         asks.set(requestId, finish);
         emit({
           ...base(threadId, turnId),
@@ -1253,10 +1249,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/reasoning/textDelta":
           case "item/reasoning/summaryTextDelta": {
-            const delta = typeof p.delta === "string" ? p.delta : "";
-            if (delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+            if (typeof p.delta === "string" && p.delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: p.delta });
             break;
           }
+          case "item/fileChange/patchUpdated": { const draft = codexPatchProgress(p); if (draft) emit({ ...base(threadId, turnId), ...draft }); break; }
           case "item/started": {
             const item = p.item ?? {};
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)
@@ -1353,7 +1349,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
                 input: t.inputTokens ?? 0,
-                output: t.outputTokens ?? 0,
+                output: t.outputTokens ?? 0, ...(typeof t.reasoningOutputTokens === "number" ? { reasoning: t.reasoningOutputTokens } : {}),
                 ...(typeof t.cachedInputTokens === "number" ? { cachedInput: t.cachedInputTokens } : {}),
                 ...(last && typeof last.inputTokens === "number" ? { contextTokens: last.inputTokens } : {}),
                 ...(typeof window === "number" && window > 0 ? { contextWindow: window } : {}),

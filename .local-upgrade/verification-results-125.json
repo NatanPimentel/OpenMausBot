@@ -1,0 +1,26 @@
+{
+  "catalog-goldens": {
+    "exit": 0,
+    "seconds": 5.8
+  },
+  "focused-tests": {
+    "exit": 0,
+    "seconds": 456.82
+  },
+  "server-typecheck-build": {
+    "exit": 0,
+    "seconds": 19.94
+  },
+  "server-bundle": {
+    "exit": 0,
+    "seconds": 0.96
+  },
+  "packaged-server-smoke": {
+    "exit": 0,
+    "seconds": 18.65
+  },
+  "ui-build": {
+    "exit": 0,
+    "seconds": 35.5
+  }
+}

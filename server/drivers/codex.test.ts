@@ -1176,6 +1176,31 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
   });
 
+  it("mounts app servers through their observers and leaves the others as they were", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const board = { command: "board-mcp", args: ["--stdio"], env: { BOARD_KEY: "board-secret" } };
+    const notes = { command: "notes-mcp", args: [], env: {} };
+    const draw = { type: "http" as const, url: "https://draw.example/mcp", headers: {} };
+    const agents = { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: "comms-fixture" } };
+    await instance.adapter.sendTurn({ threadId: "t-app-mcp", text: "go", integrations: { agents, custom: { board, notes, draw }, mcpApps: { board: { extension: true }, draw: { extension: false } } } });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const argv = seen.argv.join(" ");
+    const mount = { harnessUrl: "http://127.0.0.1:8799", token: "comms-fixture" };
+    const gate = JSON.parse(seen.env[`OMB_GATE_CONFIG_${createHash("sha256").update("board").digest("hex")}`]);
+    expect(JSON.parse(gate.OMB_GATE_APPS)).toEqual({ server: "board", ...mount, extension: true });
+    expect(JSON.parse(gate.OMB_GATE_UPSTREAM)).toEqual(board);
+    expect(gate).not.toHaveProperty("OMB_GATE_TOOL_SCOPE");
+    expect(argv).not.toContain("board-secret");
+    expect(JSON.parse(JSON.parse(seen.env[record("draw")]).OMB_REMOTE_MCP_APPS)).toEqual({ server: "draw", ...mount, extension: false });
+    expect(argv).toContain('mcp_servers.notes.command="notes-mcp"');
+    expect(seen.argv).toContain("features.shell_snapshot=false");
+    const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(expect.arrayContaining(["OMB_GATE_CONFIG_*", "OMB_REMOTE_MCP_CONFIG_*"]));
+  });
+
   // The fake starts each mount as codex-cli 0.160.1 does, whose handshake a strict server refuses.
   describe("a strict URL server", () => {
     const STRICT_TOOLS = [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }];
@@ -1680,6 +1705,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     );
     expect(settled).toHaveLength(1);
     expect((settled[0] as any).text).toBe("done from fake codex");
+  });
+
+  it("reports an apply_patch as it streams, for the chat's status line", async () => {
+    process.env.FAKE_CODEX_PATCH_BYTES = "6144";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-patch", text: "build the page" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_CODEX_PATCH_BYTES;
+    }
+    const progress = recorder.events.filter((e) => e.type === "turn.progress");
+    expect(progress).toEqual([
+      expect.objectContaining({ activity: "write", file: "index.html", bytes: 3072, itemId: "p1" }),
+      expect.objectContaining({ activity: "write", file: "index.html", bytes: 6144, itemId: "p1" }),
+    ]);
+    const types = recorder.events.map((e) => e.type);
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
   });
 
   it("tries thread/resume with a cursor and reuses the thread id", async () => {
@@ -2495,36 +2538,28 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     }
   });
 
-  it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
-    // A completed turn starts the driver's child-reap loop, whose 25ms poll would freeze on the fake clock.
-    process.env.FAKE_CODEX_ASK_HOLD = "1";
+  it("keeps a question open for days and still delivers the person's answer", async () => {
     await create({ mode: "multi-question" });
-    const dump = join(scratch, "question-timeout.json");
+    const dump = join(scratch, "question-no-timeout.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
-      await instance.adapter.sendTurn({ threadId: "t-question-timeout", text: "ask me" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
+      await instance.adapter.sendTurn({ threadId: "t-question-no-timeout", text: "ask me" });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
 
-    // The held fake records the answers once real time lets the child parse the reply.
-    let decision: unknown = null;
-    for (let i = 0; i < 80 && (decision === null || decision === undefined); i++) {
-      try {
-        decision = JSON.parse(readFileSync(dump, "utf8")).decision;
-      } catch {}
-      if (decision === null || decision === undefined) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-    expect(decision).toEqual({ answers: {} });
+    await instance.adapter.respondToRequest("t-question-no-timeout", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {

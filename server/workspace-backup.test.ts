@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createServer as createNetServer } from "node:net";
 import { gzipSync } from "node:zlib";
 import { Header } from "tar";
 import { browserProfilesRoot } from "./browser-engine.ts";
@@ -54,6 +55,7 @@ function fixture(root: string): DatabaseSync {
   json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64), sealedSecret: "sealed-webhook-secret" }], deliveries: [{ id: "delivery" }],
     deleted: [{ at: 1, webhook: { id: "gone", endpointId: "gone-endpoint", secretHash: "c".repeat(64), sealedSecret: "sealed-deleted-secret" } }] });
   json(join(root, "calendar-calls.json"), { version: 1, calls: [{ id: "call", nextRunAt: 100 }] });
+  json(join(root, "app-triggers.json"), { version: 1, pollerId: "poller-source-0001", cursor: 4, triggers: [{ id: "trigger", botId: "bot", enabled: true }], attempts: [], deleted: [] });
   json(join(root, "delegations.json"), { thread: [{ id: "pending" }] });
   const runtime = openRuntimeStore(join(root, "runtime.db"));
   try {
@@ -214,6 +216,7 @@ describe("encrypted full workspace backups", () => {
       expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).toMatch(/^[a-f0-9]{64}$/);
       expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).not.toBe("a".repeat(64));
       expect(readJson(join(target, "calendar-calls.json")).calls[0].nextRunAt).toBeNull();
+      expect(readJson(join(target, "app-triggers.json")).triggers).toEqual([{ id: "trigger", botId: "bot", enabled: false }]);
       expect(readJson(join(target, "delegations.json"))).toEqual({});
       expect(existsSync(join(target, "runtime.db-wal"))).toBe(false);
       const restoredRuntime = new DatabaseSync(join(target, "runtime.db"), { readOnly: true });
@@ -393,6 +396,27 @@ describe("encrypted full workspace backups", () => {
     for (const path of paths) {
       if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toContain("SOURCE_TURN_BEARER");
     }
+  });
+
+  it("leaves the bot box's live sockets and filter out, so a Cloud home with the box on can still be backed up and brought home", async () => {
+    // Seen in the real app on Oct 22: a Cloud that ended could not bring its chats home, because its export stopped at
+    // "Cannot back up special or live runtime file: box/broker.sock" (the T0 credential broker's socket).
+    const source = directory();
+    mkdirSync(join(source, "box"), { mode: 0o700 });
+    writeFileSync(join(source, "box", "seccomp.bpf"), Buffer.from([0x20, 0, 0, 0]), { mode: 0o600 });
+    // The live socket is the Linux box's (a Cloud home): Windows refuses a unix socket at a file path, so there the
+    // folder holds only the filter, and must still be left out.
+    const broker = process.platform === "win32" ? null : createNetServer();
+    if (broker) await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
+    try {
+      mkdirSync(join(source, "attachments"));
+      writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
+      const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+      const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+      const paths: string[] = readJson(join(source, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+      expect(paths).toContain("attachments/note.txt");
+      expect(paths.filter((path) => path === "box" || path.startsWith("box/"))).toEqual([]);
+    } finally { if (broker) await new Promise<void>((resolve) => broker.close(() => resolve())); }
   });
 
   it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {

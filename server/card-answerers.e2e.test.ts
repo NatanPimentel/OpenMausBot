@@ -144,6 +144,9 @@ posixOnly("who may answer a card on a shared workspace", () => {
       expect(refused.status, path).toBe(403);
       expect(refused.body.error).toMatch(refusal);
     }
+    // "Already answered" on Needs you hides rows for the whole workspace: a member cannot use it to close anyone's card.
+    const dismissed = await api("POST", "/api/needs-you/dismiss", { ids: [], cards: [{ threadId: bot.threadId, requestId }], pedidos: [] }, BOB);
+    expect(dismissed, JSON.stringify(dismissed.body)).toMatchObject({ status: 403 });
     expect((await openCard(bot.threadId))?.card.requestId).toBe(requestId);
 
     const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId, behavior: "allow" }, ADA);
@@ -151,7 +154,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     expect(answered.body.outcome).not.toBe("unavailable");
     const row = await decision(requestId, "user-approved");
     expect(row?.actor).toEqual({ kind: "session", sessionId: sessionIds[ADA], label: "ada's laptop", email: ADA });
-    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: ADA });
+    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: ADA, at: expect.any(Number) });
   }, 90_000);
 
   it("lets a member answer any card on a thread they started", async () => {
@@ -204,6 +207,35 @@ posixOnly("who may answer a card on a shared workspace", () => {
     expect((await decision(requestId, "user-approved"))?.actor).toMatchObject({ kind: "session", email: ADA });
   }, 90_000);
 
+  it("lets only who may answer in a member's chat answer the copy of a run's card there", async () => {
+    const bot = await makeBot("Reported");
+    const task = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Bob's chat" }, BOB);
+    expect(task.status).toBe(201);
+    const threadId = task.body.task.threadId as string;
+    const routine = await api("POST", "/api/routines", {
+      name: "Inbox watch", prompt: "run it", botId: bot.id, enabled: false, resultsThreadId: threadId,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    }, BOSS);
+    expect(routine.status, JSON.stringify(routine.body)).toBe(201);
+    expect((await api("POST", `/api/routines/${routine.body.routine.id}/run`, undefined, BOSS)).status).toBe(201);
+    const copy = await openCard(threadId);
+    expect(copy, `the run's card was never copied into Bob's chat:\n${log.slice(-2_000)}`).toMatchObject({ automation: { name: "Inbox watch" } });
+    const requestId = copy.card.requestId as string;
+
+    for (const [path, body] of [
+      [`/api/threads/${threadId}/respond`, { requestId, behavior: "allow" }],
+      [`/api/bots/${bot.id}/respond`, { requestId, behavior: "allow", threadId }],
+    ] as const) {
+      const refused = await api("POST", path, body, ADA);
+      expect(refused.status, path).toBe(403);
+      expect(refused.body.error).toMatch(refusal);
+    }
+    const answered = await api("POST", `/api/threads/${threadId}/respond`, { requestId, behavior: "allow" }, BOB);
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    expect((await decision(requestId, "user-approved"))?.actor).toMatchObject({ kind: "session", email: BOB });
+    expect((await settledCard(copy.automation.executionThreadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: BOB, at: expect.any(Number) });
+  }, 90_000);
+
   it("lets any member answer a card that names nobody, as before", async () => {
     const bot = await makeBot("Unnamed");
     const requestId = await cardFrom(bot, bot.threadId);
@@ -217,12 +249,12 @@ posixOnly("who may answer a card on a shared workspace", () => {
     const first = await cardFrom(bot, bot.threadId, ADA);
     expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first, behavior: "allow" }, BOSS)).status).toBe(200);
     expect((await decision(first, "user-approved"))?.actor).toMatchObject({ kind: "session", email: BOSS });
-    expect((await settledCard(bot.threadId, first))?.card.answeredBy).toEqual({ kind: "session", name: BOSS });
+    expect((await settledCard(bot.threadId, first))?.card.answeredBy).toEqual({ kind: "session", name: BOSS, at: expect.any(Number) });
 
     const second = await cardFrom(bot, bot.threadId, BOB);
     expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second, behavior: "deny" })).status).toBe(200);
     expect((await decision(second, "user-denied"))?.actor).toEqual({ kind: "loopback" });
-    expect((await settledCard(bot.threadId, second))?.card.answeredBy).toEqual({ kind: "loopback" });
+    expect((await settledCard(bot.threadId, second))?.card.answeredBy).toEqual({ kind: "loopback", at: expect.any(Number) });
   }, 90_000);
 
   it("lets whoever may answer a card undo its receipt, and no other member", async () => {
@@ -268,7 +300,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     const decline = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId, behavior: "deny" });
     expect(decline.status, JSON.stringify(decline.body)).toBe(200);
     expect((await decision(requestId, "user-denied"))?.actor).toEqual({ kind: "worker" });
-    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "worker" });
+    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "worker", at: expect.any(Number) });
 
     // A Slack-shaped request: the worker opens the thread and sends through
     // the guarded route, so no person can be named. Any member may approve it
