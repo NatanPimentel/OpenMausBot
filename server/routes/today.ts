@@ -11,21 +11,24 @@ export interface TodayRouteDeps {
   now?: () => number;
 }
 
-/** GET /api/today?since=<epoch ms>: `since` is the viewer's local midnight, or the start of a longer window.
- * GET /api/needs-you: only what needs this person now. */
-export function createTodayRoutes(deps: TodayRouteDeps): RouteHandler {
-  const viewerFor = (auth: RequestAuth): TodayViewer => {
-    const visible = deps.visibleFor(auth);
-    const asks = deps.asks;
-    return {
-      admin: auth.scopes.includes("admin"),
-      thread: (threadId) => visible.thread(threadId),
-      routine: (run) => routineVisible(run, visible),
-      ...(asks ? { asks: (botId: string | undefined, threadId: string) => asks(auth, botId, threadId) } : {}),
-    };
+/** What a viewer may see of Today: their conversations and, on a Team Cloud, the asks that are theirs. */
+export function todayViewer(deps: Pick<TodayRouteDeps, "visibleFor" | "asks">, auth: RequestAuth): TodayViewer {
+  const visible = deps.visibleFor(auth);
+  const asks = deps.asks;
+  return {
+    admin: auth.scopes.includes("admin"),
+    thread: (threadId) => visible.thread(threadId),
+    routine: (run) => routineVisible(run, visible),
+    ...(asks ? { asks: (botId: string | undefined, threadId: string) => asks(auth, botId, threadId) } : {}),
   };
+}
+
+/** GET /api/today?since=<epoch ms>: `since` is the viewer's local midnight, or the start of a longer window.
+ * GET /api/needs-you: only what needs this person now. With `since` it is the Needs you page instead (routes/needs-you.ts). */
+export function createTodayRoutes(deps: TodayRouteDeps): RouteHandler {
+  const viewerFor = (auth: RequestAuth) => todayViewer(deps, auth);
   return async ({ res, path, method, url, auth, json }) => {
-    if (path === "/api/needs-you") {
+    if (path === "/api/needs-you" && !url.searchParams.has("since")) {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       return json(res, 200, { items: needsYouNow(deps.sources(), viewerFor(auth), deps.now?.() ?? Date.now()) });
     }

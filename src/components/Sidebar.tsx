@@ -118,7 +118,7 @@ import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
-import { UpdateIndicator } from "./UpdateIndicator";
+import { UpdateIndicator } from "./UpdateIndicator"; import { NeedsYouNavItem } from "./NeedsYouNavItem";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerFace, OwnerPickerHost, departmentOwner, ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
 import { showWhoReportsToWhom, TeamMenuItems } from "./SidebarTeamMenu";
@@ -1727,7 +1727,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </div>
-      </div>}
+      </div>}<NeedsYouNavItem iconsOnly={density === "icons"} rail={rail} />
       {universalPins && pinnedBots.length > 0 && (
         <div
           data-sidebar-universal-pins=""

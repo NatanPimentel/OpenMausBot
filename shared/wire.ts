@@ -427,6 +427,8 @@ export type CardAnswerer = (
   /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
    * card. Absent: tapped. */
   via?: "call" | "reaction";
+  /** When it was answered (epoch ms); absent on cards answered before this was recorded. */
+  at?: number;
 };
 
 /** One transcript line, serialized as stored. */
