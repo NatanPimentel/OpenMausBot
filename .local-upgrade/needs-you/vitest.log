@@ -1,0 +1,95 @@
+ RUN  v4.1.11 /home/natan/orca/workspaces/OpenMausBot/dev-dr-eggbot-openmausbot-pagina-precisa-de-voce-fixa
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets the member who sent the request answer it, and no other member
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets a member answer any card on a thread they started
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > follows a thread a bot opened for a member back to that member
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets only who may answer in a member's chat answer the copy of a run's card there
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets any member answer a card that names nobody, as before
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets an admin and the owner on this machine answer anyone's card
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets whoever may answer a card undo its receipt, and no other member
+ ✓ server/card-answerers.e2e.test.ts > who may answer a card on a shared workspace > lets a session-less local service decline but never approve under service trust
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/needs-you.e2e.test.ts > lists a subject two bots asked once, and one answer settles every card and the pedir-natan request
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/late-question-today.e2e.test.ts > keeps a question nobody answered on Today after its turn ends, and a late answer wakes the bot and clears it
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ src/lib/i18n.test.ts > resolveLocale > keeps a registered exact tag, case-insensitively
+ ✓ src/lib/i18n.test.ts > resolveLocale > falls back from a regional tag to its base language
+ ✓ src/lib/i18n.test.ts > resolveLocale > falls back through script tags before the base language
+ ✓ src/lib/i18n.test.ts > resolveLocale > falls back to English for unknown or missing tags
+ ✓ src/lib/i18n.test.ts > t > returns the English catalog value by default
+ ✓ src/lib/i18n.test.ts > t > keeps new team lifecycle labels available in partial packs, with interpolated names and counts
+ ✓ src/lib/i18n.test.ts > t > setLocale reports the locale that actually took effect
+ ✓ src/lib/i18n.test.ts > t > resolves every registered locale to itself
+ ✓ src/lib/i18n.test.ts > t > routes common system tags onto the shipped packs
+ ✓ src/lib/i18n.test.ts > t > every registered pack carries only known keys with non-empty values
+ ✓ src/lib/i18n.test.ts > t > ships translated model and trusted-access help for threads
+ ✓ src/lib/i18n.test.ts > t > ships exactly one JSON catalog for every picker language
+ ✓ src/lib/i18n.test.ts > t > overlays a partial pack and falls back to English for missing keys
+ ✓ src/lib/i18n.test.ts > t > interpolates params and keeps unmatched placeholders visible
+ ✓ src/lib/i18n.test.ts > tFromServer > translates a key the catalog knows
+ ✓ src/lib/i18n.test.ts > tFromServer > falls back to English for a key this build does not carry
+ ✓ src/lib/i18n.test.ts > tFromServer > rejects inherited catalog property constructor
+ ✓ src/lib/i18n.test.ts > tFromServer > rejects inherited catalog property toString
+ ✓ src/lib/i18n.test.ts > tFromServer > rejects inherited catalog property __proto__
+ ✓ src/lib/i18n.test.ts > tFromServer > shows a card that carries only text, and nothing when it carries neither
+ ✓ src/lib/i18n.test.ts > tFromServer > prefers the catalog over stale text saved with an older card
+ ✓ src/lib/i18n.test.ts > page language > names every picker language with a valid BCP-47 tag
+ ✓ src/lib/i18n.test.ts > page language > tags an alias with the pack it shows
+ ✓ src/lib/i18n.test.ts > page language > sets the page language and direction whenever the locale changes
+ ✓ src/lib/i18n.test.ts > page language > tags the page from the system language the moment the module loads
+ ✓ src/lib/i18n.test.ts > page language > still switches language where there is no page (tests, workers)
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/today.test.ts > today's report > counts finished outcomes once, routines OK and failed, and the minutes they stand for
+ ✓ server/today.test.ts > today's report > lists each finished piece of work once, newest first, with who started it and what it produced
+ ✓ server/today.test.ts > today's report > opens a run where it reported, and lists no run that found nothing new
+ ✓ server/today.test.ts > today's report > reads a longer window back to its start, and never further than eight days
+ ✓ server/today.test.ts > today's report > shows a member only the bots they can see
+ ✓ server/today.test.ts > today's report > caps the lines it returns and says how many more there were
+ ✓ server/today.test.ts > needs you > lists only what the person can fix, each once, most blocking first
+ ✓ server/today.test.ts > needs you > drops a failure once the bot finished a turn after it, an engine signed back in, or the app worked again
+ ✓ server/today.test.ts > needs you > keeps a question nobody answered after its turn ends, until the person answers it, within the week
+ ✓ server/today.test.ts > needs you > drops a question the person closed, and lists a request asked again only where it was asked last
+ ✓ server/today.test.ts > needs you > lists a run's question once, where its copy can be answered, not in the run's own conversation too
+ ✓ server/today.test.ts > needs you > looks a week back whatever the window, and gives someone who is not an admin only their bots' questions
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > renders an already fetched screen in the same commit that mounts it
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > renders nothing before its chunk arrives, then the screen
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > fetches a chunk once, however many places ask for it
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > keeps the screen's own state across re-renders once it has loaded
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > a chunk that keeps failing shows a reload notice for that screen only, and logs it
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > logs a failed prefetch rather than dropping it silently
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > the next open asks once more, so a browser that fetches it again recovers
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > asks once per open and never polls, since a cached failure cannot recover by asking
+ ✓ src/components/lazy-screens.test.ts > lazyScreen > a screen closed before its chunk fails leaves nothing behind
+ ✓ src/components/lazy-screens.test.ts > preloadScreens > fetches every deferred screen once the launch is idle, and can be cancelled
+ ✓ src/components/lazy-screens.test.ts > preloadScreens > falls back to a timer where requestIdleCallback is missing
+ ✓ src/components/lazy-screens.test.ts > preloadScreens > a window opened onto Settings fetches Settings at once, not when idle
+ ✓ src/components/lazy-screens.test.ts > launch bundle > leaves the on-request screens out of it
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/needs-you.test.ts > needsYouPage > shows each of today's subjects once, however many bots and copies asked it
+ ✓ server/needs-you.test.ts > needsYouPage > drops a subject from the page once one answer settled every card that asked it
+ ✓ server/needs-you.test.ts > needsYouPage > keeps a subject open while a copy closed as a duplicate points at the card still waiting
+ ✓ server/needs-you.test.ts > needsYouPage > settles a card whose pedir-natan request the bot resolved, with the bot's line
+ ✓ server/needs-you.test.ts > needsYouPage > lists a pedir-natan request with no card yet, recommended option first, and hides it while an answer is on its way
+ ✓ server/needs-you.test.ts > needsYouPage > adds open approvals, parked work and settings problems, each opening its conversation
+ ✓ server/needs-you.test.ts > needsYouPage > shows only conversations the viewer may see
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ src/lib/needs-you.test.ts > answerSubject > answers every card the way its own buttons do, then the pedir-natan request, then reloads the page
+ ✓ src/lib/needs-you.test.ts > answerSubject > keeps answering the other cards when one refuses, and counts the refusal
+stderr | unknown test
+Importing from "vitest/runners" is deprecated since Vitest 4.1. Please use "vitest" instead.
+ ✓ server/question-subjects.test.ts > question subjects > weighs and compares questions exactly as pergunta-registro does
+ ✓ server/question-subjects.test.ts > question subjects > ignores the pedir-natan footer and inbox provenance when weighing a question
+ Test Files  9 passed (9)
+      Tests  72 passed (72)
+   Start at  15:24:23
+   Duration  33.00s (transform 3.26s, setup 2.80s, import 3.04s, tests 25.52s, environment 227ms)
