@@ -20,6 +20,11 @@ export interface ChiefNoticeDeps {
   groupTurnActive(botId: string): boolean;
   startTurn(botId: string, text: string, opts: { threadId: string; unattended: true; peerAsk: PeerAsk }): Promise<unknown>;
   escalationsEnabled(): boolean;
+  /** Security invariant: a read-and-draft run's prompt and reply carry mail and invite text, so its failures and
+   * questions never reach a Chief as a notice. */
+  quietThread?(botId: string, threadId: string): boolean;
+  /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
+  privateThread?(threadId: string): boolean;
 }
 
 export function createChiefNotices(deps: ChiefNoticeDeps) {
@@ -60,7 +65,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       }
       return "person" as const;
     };
-    if (!chief) return tellThePerson();
+    if (!chief || deps.privateThread?.(threadId)) return tellThePerson();
     const notices = store.tasks(chief.id).find((candidate) => candidate.title === input.title && !candidate.archivedAt)
       ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
     if (!notices || notices.threadId === threadId) return tellThePerson();
@@ -89,6 +94,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
 
   function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
     const { bot, threadId } = input;
+    if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
     if (deps.assignerOf(threadId)) return;
     const group = store.groupByThread(threadId);
@@ -117,6 +123,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     if (!deps.escalationsEnabled()) return "off";
     try {
       const { bot, threadId } = input;
+      if (deps.quietThread?.(bot.id, threadId)) return "skipped";
       if (input.kind === "needs-input" && deps.assignerOf(threadId)) return "skipped";
       const task = store.taskByThread(bot.id, threadId);
       const group = store.groupByThread(threadId);

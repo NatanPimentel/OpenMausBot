@@ -35,6 +35,7 @@ const ENTRY_POINTS = [
   "openmausbot.ts",
   "pair-cli.ts",
   "workspace-backup.worker.ts",
+  "openbot-data/child.ts",
   // the OMB Cloud Pro home image's entry point
   "cloud-home-start.ts",
   // the container image's entry point
@@ -56,6 +57,10 @@ const ENTRY_POINTS = [
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
+  // the bot box (server/bot-box): the in-box bridge, the probe the self-check runs inside a box, and the check by hand
+  "bot-box/box-bridge.ts",
+  "bot-box/box-probe.ts",
+  "bot-box/box-check.ts",
 ];
 
 await build({

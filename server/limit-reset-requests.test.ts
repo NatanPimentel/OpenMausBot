@@ -3,7 +3,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { callTriggerTool } from "./drivers/agents-call-triggers.ts";
 import type { ToolCallContext } from "./drivers/agents-call.ts";
@@ -16,7 +16,14 @@ import { PASS, type RouteContext } from "./routes/table.ts";
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 class MemoryStore implements RoutineRequestStore {
   readonly threads = new Map<string, RoutineRequestMessage[]>();
