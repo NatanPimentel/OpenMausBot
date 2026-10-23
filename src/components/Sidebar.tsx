@@ -122,6 +122,7 @@ import { useCloudOwner } from "./CloudOwner";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { NeedsYouNavItem } from "./NeedsYouNavItem";
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -1740,6 +1741,9 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           />
         </div>
       </div>}
+      <div data-sidebar-needs-you="" className={density === "icons" ? "flex justify-center px-2 pb-1" : "px-2 pb-2"}>
+        <NeedsYouNavItem iconsOnly={density === "icons"} rail={rail} />
+      </div>
       {universalPins && pinnedBots.length > 0 && (
         <div
           data-sidebar-universal-pins=""

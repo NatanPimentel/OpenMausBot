@@ -31,3 +31,26 @@ Nada em My Cloud (`server/cloud*`, config, consentimento) foi tocado; o envio au
 - `tsc -p tsconfig.server.build.json`, `scripts/bundle-server.mjs`, `smoke-packaged-server.mjs`: ok.
 - Build UI (vite): ok com heap 4096 MB. O bundle contém `notifications.read`.
 - Não rodados: lint, typecheck global, suíte completa, Electron. GPU é aplicado no app.asar novo na instalação.
+
+---
+
+# Página "Precisa de você" (23/10/2026)
+
+Item fixo no topo da barra lateral, acima dos times, com o número de pendências; abre uma página própria (`activeView: "needs-you"`).
+Uma linha por assunto: cartões de pergunta de todos os bots, cópias do pedir-natan (rodapé `pedido <id>`), pedidos ainda sem cartão,
+aprovações abertas, trabalho parado em pergunta e problemas de configuração do Needs you do Hoje.
+
+- Agrupamento: porte de `pergunta_registro.py` (`limpar`, `tokens`, `pesos`, `carregar_idf`, `similaridade`) em `server/question-subjects.ts`,
+  idêntico ao Python nos 78 casos do registro de 23/10 (3003 pares). Mesmo assunto: mesmo pedido, similaridade ≥ 0,45 (portão), ou ≥ 0,35
+  quando é o mesmo bot (limiar do `grupos`).
+- Responder: a página responde cada cartão do grupo por `/api/threads/:id/respond` (o caminho do botão do cartão); o pedido com cartão
+  recebe a resposta pela ponte do pedir-natan (colher), o pedido sem cartão por `pedir-natan responder` (`POST /api/needs-you/pedidos`).
+- Nada sai por tempo. Sai quando respondido, ou quando o pedido foi resolvido (`pedir-natan resolver`) ou o cartão fechado pela CLI do
+  registro com texto que não é de duplicata; aparece em "Resolvidas hoje" com a linha de como.
+- Número único: `GET /api/needs-you?since=<ms>` → `count`. A barra, a página e o ícone do app (`setUnreadCount`) usam esse número.
+
+## Montar o pacote 0.1.125 (quem instala é o Dr. Eggbot)
+    node scripts/bundle-server.mjs && NODE_OPTIONS=--max-old-space-size=4096 node node_modules/vite/bin/vite.js build
+    rsync -a --delete dist-server/ ~/.local/share/openmausbot-mod/0.1.125/server/
+    rsync -a --delete dist/ ~/.local/share/openmausbot-mod/0.1.125/ui/
+O `app.asar.patched` não muda. Depois: `sudo -n ~/.local/share/openmausbot-mod/instalar-servidor.sh` e um reinício.
