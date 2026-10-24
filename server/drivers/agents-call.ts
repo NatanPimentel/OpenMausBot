@@ -11,6 +11,9 @@ import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
+import { callOpenBotDataTool, OPENBOT_DATA_TOOL_NAMES } from "./agents-openbot-data.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -153,6 +156,13 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
 export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
+  if (name === "routine_no_update") {
+    const { ok, body } = await apiResponse("/api/internal/routine-no-update", {
+      method: "POST", body: JSON.stringify(args),
+    });
+    return ok ? { text: "No-update recorded for this run. End without text." }
+      : { text: String(body.error ?? "No-update was refused."), isError: true };
+  }
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
       method: "POST",
@@ -178,7 +188,10 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   }
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
+  if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
+  if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
+  if (OPENBOT_DATA_TOOL_NAMES.has(name)) return callOpenBotDataTool(name, args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
     return { text: "Computer sharing is turned off in this workspace. There are no shared computers to use.", isError: true };
@@ -391,6 +404,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
   }
+  if (name === "list_team_library") {
+    return { text: JSON.stringify(await api("/api/internal/team-library")) };
+  }
   if (name === "propose_team_setup" || name === "propose_bot_deletion") {
     const deleting = name === "propose_bot_deletion";
     const result = await api(deleting ? "/api/internal/bot-deletion-requests" : "/api/internal/team-setup-requests", {
@@ -419,12 +435,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
-        ...(args.suggestion === true ? { suggestion: true } : {}),
       }),
     });
-    if (r.state === "pending" && args.suggestion === true) {
-      return { text: `Your suggestion is on one card for the user: ${String(r.title)}. @${botName} has not been created. End this turn; their answer resumes you once. If they choose Not now, do not suggest another specialist in this conversation unless they ask.` };
-    }
     if (r.state === "pending") {
       return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
     }

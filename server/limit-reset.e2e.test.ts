@@ -4,13 +4,15 @@
 // another sign-in to the same engine is never used. The limit clock hook shortens the minute after a reset to a
 // second, so each run is watched without waiting.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const codex = { instanceId: "codex", model: "gpt-fake-default" };
 const jsonLines = (path: string): unknown[] => existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -20,13 +22,18 @@ interface Fixture {
   control: (...args: string[]) => Promise<any>;
   /** The fake Claude refuses every turn until this reset (epoch seconds); `lift()` ends the limit. */
   limit: (resetsAt: number) => void;
+  /** The fake Claude refuses every turn with exactly this rate_limit_info until `lift()`. */
+  refuse: (info: Record<string, unknown>) => void;
   lift: () => void;
   claudePrompts: () => unknown[];
   dataDir: string;
+  /** The server's own log. */
+  serverLog: () => string;
   evidence: unknown[];
+  memoryUrl?: string;
 }
 
-async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean }, check: (fixture: Fixture) => Promise<void>) {
+async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean; fleetAccountFailover?: boolean; memoryBridge?: "echo" | "offline" | "hold" | "real" }, check: (fixture: Fixture) => Promise<void>) {
   const fixture = await launchVerificationServer({});
   const { dataDir, url, logPath } = fixture.info;
   const limitedFile = join(dataDir, "claude-limited.json");
@@ -34,6 +41,8 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
   const usageFile = join(dataDir, "plan-usage.json");
   const evidence: unknown[] = [{ url, setup }];
   let server: ChildProcess | undefined;
+  let memoryServer: ChildProcess | undefined;
+  let memoryUrl: string | undefined;
   const api = async (method: string, path: string, body?: unknown, expectedStatus?: number) => {
     const response = await fetch(url + path, {
       method, headers: { "content-type": "application/json", origin: url },
@@ -55,10 +64,67 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
     const configPath = join(dataDir, "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     config.instances.claude.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: limitedFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_TOOL_CALLS: "[]" };
+    if (setup.memoryBridge === "real") {
+      config.instances.claude.environment.FAKE_CLAUDE_REPLIES = JSON.stringify([
+        `ASSISTANT_RECEIPT receipt-A was sent. Historical diagnostics: ${"historical investigation detail ".repeat(600)}`,
+        `ASSISTANT_DIAGNOSTICS ${"superseded investigation detail ".repeat(600)}`,
+      ]);
+      config.instances.claude.environment.FAKE_CLAUDE_REPLY_STATE = join(dataDir, "real-memory-reply-state");
+    }
     config.instances.codex = { driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) } };
     if (setup.secondClaude) config.instances.claudeWork = { ...config.instances.claude, displayName: "Second Claude sign-in" };
+    if (setup.fleetAccountFailover) {
+      config.instances.claude.config.configDir = join(dataDir, "primary-profile");
+      config.instances.claude.environment.FAKE_CLAUDE_SESSION_START_FRAMES = "1";
+      config.instances.claudeWork.config = { ...config.instances.claude.config, configDir: join(dataDir, "backup-profile") };
+      config.instances.claudeWork.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: join(dataDir, "unused-limit.json") };
+    }
     if (setup.recovery) config.automaticRecovery = setup.recovery;
     writeFileSync(configPath, JSON.stringify(config));
+    const memoryBridgePath = join(dataDir, "memory-bridge.py");
+    if (setup.memoryBridge === "real") {
+      const realBridgePath = process.env.OMB_AI_MEMORY_TEST_BRIDGE;
+      expect(realBridgePath && existsSync(realBridgePath), "Provide OMB_AI_MEMORY_TEST_BRIDGE pointing to the real checkpoint bridge").toBe(true);
+      const port = await freePortBlock([0], 23_000, 3_000);
+      memoryUrl = `http://127.0.0.1:${port}`;
+      const memoryHome = join(dataDir, "memory-home");
+      mkdirSync(memoryHome);
+      const memoryLogPath = `${logPath}.ai-memory.log`;
+      const memoryLog = openSync(memoryLogPath, "a", 0o600);
+      try {
+        memoryServer = spawn(process.env.OMB_AI_MEMORY_TEST_BINARY ?? join(userInfo().homedir, ".local", "bin", "ai-memory"), [
+          "--data-dir", join(dataDir, "memory-data"), "serve", "--transport", "http", "--bind", `127.0.0.1:${port}`,
+          "--workspace", "fixture", "--project", "handoff", "--no-watcher",
+        ], {
+          env: { HOME: memoryHome, USERPROFILE: memoryHome, PATH: `${dirname(process.execPath)}${delimiter}/usr/bin`, LANG: "C.UTF-8" },
+          stdio: ["ignore", memoryLog, memoryLog],
+        });
+        memoryServer.on("error", () => {});
+      } finally { closeSync(memoryLog); }
+      await expect.poll(async () => {
+        try { return (await fetch(`${memoryUrl}/workstream/invalid/events`, { signal: AbortSignal.timeout(500) })).status; }
+        catch { return 0; }
+      }, { timeout: 15_000 }).toBe(400);
+      evidence.push({ memoryUrl, memoryLogPath, memoryPid: memoryServer?.pid, isolatedMemoryData: join(dataDir, "memory-data") });
+    }
+    if (setup.memoryBridge) writeFileSync(memoryBridgePath, [
+      "import json, pathlib, sys, time",
+      "request = json.load(sys.stdin)",
+      `root = pathlib.Path(${JSON.stringify(dataDir)})`,
+      '(root / "memory-bridge-request.json").write_text(json.dumps(request))',
+      ...(setup.memoryBridge === "offline" ? ["sys.exit(1)"] : []),
+      ...(setup.memoryBridge === "hold" ? ['while not (root / "memory-bridge-release").exists(): time.sleep(0.02)'] : []),
+      ...(setup.memoryBridge === "real" ? [
+        "import importlib.util",
+        "sys.dont_write_bytecode = True",
+        `spec = importlib.util.spec_from_file_location("real_handoff_bridge", ${JSON.stringify(process.env.OMB_AI_MEMORY_TEST_BRIDGE)})`,
+        "bridge = importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(bridge)",
+        `result = bridge.exchange(request, server_url=${JSON.stringify(memoryUrl)}, state_dir=root / "memory-refs")`,
+        '(root / "memory-bridge-response.json").write_text(json.dumps(result))',
+        "json.dump(result, sys.stdout)",
+      ] : ['json.dump(dict(request, workspace="default", project=request["conversationId"].split(":")[0], handoffId="fixture-checkpoint", text=request["summary"]), sys.stdout)']),
+    ].join("\n"));
     // No engine reports usage here: what the server knows of the limit comes from the refusal itself.
     writeFileSync(usageFile, JSON.stringify({ providers: [] }));
     const log = openSync(logPath, "a", 0o600);
@@ -66,7 +132,9 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       "--experimental-strip-types", "--import", new URL("./testing/limit-clock-hooks.mjs", import.meta.url).href, fileURLToPath(new URL("./index.ts", import.meta.url)),
     ], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile },
+      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile,
+        ...(setup.memoryBridge ? { OMB_AI_MEMORY_HANDOFF_COMMAND: memoryBridgePath, PATH: `${dirname(process.execPath)}${delimiter}/usr/bin` } : {}),
+        ...(setup.fleetAccountFailover ? { OMB_CLAUDE_ACCOUNT_FAILOVER: "1" } : {}) },
       stdio: ["ignore", log, log],
     });
     closeSync(log);
@@ -77,16 +145,24 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       const { instances } = await api("GET", "/api/instances") as { instances: any[] };
       return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === codex.model);
     }, { timeout: 20_000 }).toBe(true);
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // of its own on Claude, whose prompts these tests count. Stepped down, only the conversations under test run.
+    const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
+    const starter = bots.find((bot) => bot.chiefOfStaff)!;
+    await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });
     await check({
-      api, control, dataDir, evidence,
+      api, control, dataDir, evidence, memoryUrl,
       limit: (resetsAt) => writeFileSync(limitedFile, JSON.stringify({ status: "rejected", rateLimitType: "five_hour", resetsAt })),
+      refuse: (info) => writeFileSync(limitedFile, JSON.stringify(info)),
       lift: () => rmSync(limitedFile, { force: true }),
       claudePrompts: () => jsonLines(promptsFile),
+      serverLog: () => existsSync(logPath) ? readFileSync(logPath, "utf8") : "",
     });
   } finally {
     const evidencePath = `${logPath}.limit-reset.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
     await waitForExit(server, { signal: "SIGTERM" });
+    await waitForExit(memoryServer, { signal: "SIGTERM" });
     await fixture.close();
     console.info(JSON.stringify({ logPath, evidencePath, fixtureRemoved: !existsSync(dataDir) }));
   }
@@ -130,6 +206,108 @@ it("the stopped turn's Continue sets up a run that continues the conversation on
     expect(after.findLast((message) => message.role === "bot" && message.kind === "text")).toMatchObject({ text: "hello from fake claude" });
     evidence.push({ stopped, routine, run, after });
   });
+}, 120_000);
+
+it.each(["echo", "offline"] as const)("uses a durable account handoff only after the memory bridge succeeds (%s)", async memoryBridge => {
+  await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, fleetAccountFailover: true, memoryBridge },
+    async ({ api, control, limit, claudePrompts, dataDir, serverLog }) => {
+      const { bot } = await control("new-bot", "--name", "Memory continuity");
+      const threadId = bot.activeTaskId;
+      await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: { ...bot.modelSelection, effort: "medium" } });
+      for (const text of ["OLD_GOAL use port 9000", "COMPLETED_ACTION receipt-A was already sent; never send it twice", "CORRECTION cancel port 9000, use port 9001", "RECENT_WORK keep the receipt and finish the report"]) {
+        await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
+        expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+      }
+      const before = await messagesOf(api, threadId);
+      const sibling = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Sibling continuity" })).task;
+      limit(Math.floor(Date.now() / 1000) + 600);
+      await control("send", "--bot", bot.id, "--task", threadId, "--text", "LATEST_REQUEST finish the corrected report once");
+      expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+      const messages = await messagesOf(api, threadId);
+      for (const previous of before) expect(messages.some(message => message.id === previous.id)).toBe(true);
+      expect(messages.filter(message => message.kind === "compaction")).toHaveLength(memoryBridge === "echo" ? 1 : 0);
+      const prompt = JSON.stringify(claudePrompts().at(-1));
+      expect(prompt).toContain("COMPLETED_ACTION");
+      expect(prompt).toContain("CORRECTION");
+      expect(prompt.match(/LATEST_REQUEST/g)).toHaveLength(1);
+      expect(messages.filter(message => message.role === "user" && message.text?.includes("LATEST_REQUEST"))).toHaveLength(1);
+      const task = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")).find((item: any) => item.id === bot.id).tasks.find((item: any) => item.threadId === threadId);
+      expect(task.modelSelection).toMatchObject({ instanceId: "claudeWork", effort: "medium" });
+      if (memoryBridge === "echo") {
+        expect(prompt).toContain("Earlier conversation summary");
+        expect(task.appliedCompactionId).toBe(messages.find(message => message.kind === "compaction").id);
+        const dump = JSON.parse(readFileSync(join(dataDir, "fake-claude-dump.json"), "utf8"));
+        expect(dump.argv).not.toContain("--resume");
+        const request = JSON.parse(readFileSync(join(dataDir, "memory-bridge-request.json"), "utf8"));
+        expect(request.conversationId).toBe(`${bot.id}:${threadId}`);
+        expect(request.summary).not.toContain("LATEST_REQUEST");
+      }
+      expect((await messagesOf(api, sibling.threadId)).some(message => message.kind === "compaction")).toBe(false);
+      const handoffLines = serverLog().split("\n").filter(line => line.includes("[account-handoff]") && line.includes(`thread=${threadId}`));
+      if (memoryBridge === "echo") expect(handoffLines).toEqual([expect.stringMatching(/carried bot=\S+ thread=\S+ bytes=\d+ attachments-left-out=false$/)]);
+      else expect(handoffLines).toEqual([expect.stringMatching(/skipped bot=\S+ thread=\S+ reason=bridge-failed$/)]);
+    });
+}, 120_000);
+
+it("an account switch in a short conversation says so in the log, and one with an attachment still carries its words", async () => {
+  await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, fleetAccountFailover: true, memoryBridge: "echo" },
+    async ({ api, control, limit, claudePrompts, dataDir, serverLog }) => {
+      const short = (await control("new-bot", "--name", "Short")).bot;
+      const long = (await control("new-bot", "--name", "With attachment")).bot;
+      for (const text of ["OLD_GOAL use port 9000", "SHARE the file <attached-file path=\"/private/evidence-SECRET.pdf\" name=\"evidence-SECRET.pdf\" />", "CORRECTION use port 9001", "RECENT_WORK finish the report"]) {
+        await control("send", "--bot", long.id, "--task", long.activeTaskId, "--text", text);
+        expect((await control("wait", "--bot", long.id, "--task", long.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      }
+      limit(Math.floor(Date.now() / 1000) + 600);
+      await control("send", "--bot", short.id, "--task", short.activeTaskId, "--text", "ONLY_REQUEST do it once");
+      expect((await control("wait", "--bot", short.id, "--task", short.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      expect(existsSync(join(dataDir, "memory-bridge-request.json"))).toBe(false);
+      await control("send", "--bot", long.id, "--task", long.activeTaskId, "--text", "LATEST_REQUEST finish the report once");
+      expect((await control("wait", "--bot", long.id, "--task", long.activeTaskId, "--timeout", "30")).status).toBe("settled");
+      const lines = serverLog().split("\n").filter(line => line.includes("[account-handoff]"));
+      expect(lines.filter(line => line.includes(`thread=${short.activeTaskId}`))).toEqual([expect.stringMatching(/skipped .* reason=short-conversation$/)]);
+      expect(lines.filter(line => line.includes(`thread=${long.activeTaskId}`))).toEqual([expect.stringMatching(/carried .* attachments-left-out=true$/)]);
+      const request = JSON.parse(readFileSync(join(dataDir, "memory-bridge-request.json"), "utf8"));
+      expect(request.summary).toContain("SHARE the file");
+      expect(request.summary).not.toContain("evidence-SECRET");
+      expect(request.summary).not.toContain("LATEST_REQUEST");
+      const prompt = JSON.stringify(claudePrompts().at(-1));
+      expect(prompt).toContain("Earlier conversation summary");
+      expect(prompt).toContain("CORRECTION");
+      expect(prompt).not.toContain("evidence-SECRET");
+      expect(await messagesOf(api, long.activeTaskId)).toContainEqual(expect.objectContaining({ kind: "compaction" }));
+    });
+}, 120_000);
+
+it.each(["Stop", "new input", "branch edit"] as const)("does not apply a late memory handoff after %s", async action => {
+  await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, fleetAccountFailover: true, memoryBridge: "hold" },
+    async ({ api, control, limit, claudePrompts, dataDir }) => {
+      const { bot } = await control("new-bot", "--name", "Memory cancellation");
+      const threadId = bot.activeTaskId;
+      for (const text of ["ORIGINAL_BRANCH", "SECOND_EXCHANGE", "THIRD_EXCHANGE"]) {
+        await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
+        expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+      }
+      limit(Math.floor(Date.now() / 1000) + 600);
+      await control("send", "--bot", bot.id, "--task", threadId, "--text", "STALE_REQUEST");
+      await expect.poll(() => existsSync(join(dataDir, "memory-bridge-request.json")), { timeout: 15_000 }).toBe(true);
+      const promptsBefore = claudePrompts().length;
+      if (action === "Stop") await control("interrupt", "--bot", bot.id, "--task", threadId);
+      else if (action === "new input") await control("send", "--bot", bot.id, "--task", threadId, "--text", "NEW_REQUEST wins");
+      else {
+        const original = (await messagesOf(api, threadId)).find(message => message.text === "ORIGINAL_BRANCH");
+        await control("interrupt", "--bot", bot.id, "--task", threadId);
+        await control("edit", "--bot", bot.id, "--task", threadId, "--message", original.id, "--text", "NEW_BRANCH wins");
+      }
+      writeFileSync(join(dataDir, "memory-bridge-release"), "release");
+      await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+      const messages = await messagesOf(api, threadId);
+      expect(messages.filter(message => message.kind === "compaction")).toHaveLength(0);
+      const laterPrompts = claudePrompts().slice(promptsBefore);
+      if (action === "Stop") expect(laterPrompts).toHaveLength(0);
+      else expect(JSON.stringify(laterPrompts)).toContain(action === "new input" ? "NEW_REQUEST" : "NEW_BRANCH");
+      expect(JSON.stringify(laterPrompts)).not.toContain("Earlier conversation summary");
+    });
 }, 120_000);
 
 it("continues on the backup engine with one line, and goes back to its own engine after the reset", async () => {
@@ -189,4 +367,45 @@ it("never moves to another sign-in of the same engine; the stopped turn offers C
       expect(claudePrompts()).toHaveLength(1);
       expect((await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     });
+}, 120_000);
+
+it("a model out of extra-usage credits moves that turn to the backup, but never holds the engine", async () => {
+  await withLimitFixture({ recovery: { enabled: true, backup: codex } }, async ({ api, control, refuse, lift, claudePrompts, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 11 * 86_400;
+    refuse({ status: "rejected", resetsAt, overageDisabledReason: "out_of_credits", isUsingOverage: false, errorCode: "credits_required" });
+    const { bot } = await control("new-bot", "--name", "Hazel");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Remind me to commit");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    expect(claudePrompts()).toHaveLength(1);
+    expect((await api("GET", "/api/limit-resets")).engines).not.toContainEqual(expect.objectContaining({ engine: "claude", blocked: true }));
+
+    lift();
+    const { task: other } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Another thing" });
+    await control("send", "--bot", bot.id, "--task", other.threadId, "--text", "And check today's commits");
+    expect((await control("wait", "--bot", bot.id, "--task", other.threadId, "--timeout", "30")).status).toBe("settled");
+    expect(claudePrompts()).toHaveLength(2);
+    const reply = (await messagesOf(api, other.threadId)).findLast((message) => message.role === "bot" && message.kind === "text");
+    expect(reply).toMatchObject({ text: "hello from fake claude" });
+    evidence.push({ reply });
+  });
+}, 120_000);
+
+it("a turn that works on the engine afterwards ends a refusal's hold long before its reset", async () => {
+  await withLimitFixture({}, async ({ api, control, limit, lift, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 11 * 86_400;
+    limit(resetsAt);
+    const { bot } = await control("new-bot", "--name", "Scout");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Write the report");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
+    expect((await api("GET", "/api/limit-resets")).engines).toContainEqual(expect.objectContaining({ engine: "claude", blocked: true, resetsAt: resetsAt * 1000 }));
+
+    lift();
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Continue");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    const after = await api("GET", "/api/limit-resets");
+    expect(after.engines).not.toContainEqual(expect.objectContaining({ engine: "claude", blocked: true }));
+    evidence.push({ after });
+  });
 }, 120_000);

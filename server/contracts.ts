@@ -143,6 +143,8 @@ export interface SendTurnInput {
   integrations?: {
     /** A harness-owned stdio bridge to Composio, so connection requests become trusted chat cards. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
+    /** The same bridge to a Team Cloud member's own apps, only in that member's own turns. */
+    composioOwn?: { command: string; args: string[]; env: Record<string, string> };
     /** Stdio connection to a computer MCP server. `scope` is set only for the host desktop, so host-only approval rules never apply elsewhere. */
     localComputer?: {
       command: string;
@@ -168,6 +170,9 @@ export interface SendTurnInput {
     dweb?: { url: string };
     /** The user's MCP servers, mounted without any pre-allow; a driver skips a kind it cannot speak. */
     custom?: Record<string, McpServerSpec>;
+    /** The `custom` servers this turn mounts through an MCP Apps observer; `extension`: advertise the
+     * UI extension (false once the server refused it). A server not named here is mounted unchanged. */
+    mcpApps?: Record<string, { extension: boolean }>;
     /** Characters of one tool result per `custom` server; 0 = never trim, a missing name = the app default. */
     customResultBudgets?: Record<string, number>;
   };
@@ -411,6 +416,16 @@ export interface TextGenerationOptions {
   model?: string;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
+  /** For a bot's own engine whose driver picks a small model of its own. */
+  fallback?: SmallModelFallback;
+}
+
+export interface SmallModelFallback {
+  /** The bot's own model on this instance: used instead of a small model the sign-in cannot use, and once more when the provider refuses the small one. */
+  model?: string;
+  /** Small models this instance refused before: never picked. */
+  refused: ReadonlySet<string>;
+  onRefused: (model: string) => void;
 }
 
 export interface ProviderInstance {
@@ -419,6 +434,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
+  readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
   /** Set while the last run's catalog is still refreshing; a turn awaits it, listen does not. */
