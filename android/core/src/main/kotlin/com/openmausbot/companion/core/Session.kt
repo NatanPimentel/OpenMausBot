@@ -1500,6 +1500,8 @@ class Session(
             val bot = activeClient.createBot()
             _state.update { it.apply(Frame.Bot(bot)) }
             bot
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
@@ -1512,6 +1514,8 @@ class Session(
             val room = activeClient.createRoom(name, memberIds)
             _state.update { it.apply(Frame.Room(room)) }
             room
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
@@ -1531,6 +1535,8 @@ class Session(
                     updatedBots.fold(state) { current, bot -> current.apply(Frame.Bot(bot)) }
                 }
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
@@ -1589,6 +1595,8 @@ class Session(
         try {
             val page = activeClient.messages(threadId, before = oldest.id, limit = 50)
             _state.update { it.prepend(page, threadId) }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
         }
@@ -1607,6 +1615,8 @@ class Session(
         val activeClient = client ?: return emptyList()
         return try {
             activeClient.search(trimmed)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             emptyList()
@@ -1643,6 +1653,8 @@ class Session(
                 return _state.value.chat(ChatTarget.Room(groupId, hit.threadId))
             }
             null
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
@@ -2162,6 +2174,8 @@ class Session(
         try {
             val patched = activeClient.toggleReaction(inThreadId, to.id, emoji)
             _state.update { it.apply(Frame.MessagePatch(inThreadId, patched)) }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
         }
@@ -2198,6 +2212,8 @@ class Session(
         try {
             val leaf = activeClient.setActiveBranch(forBot.id, to.id, forBot.threadId)
             _state.update { it.apply(Frame.Thread(forBot.threadId, leaf)) }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
         }
@@ -2208,6 +2224,8 @@ class Session(
         return try {
             val exported = activeClient.export(threadId, format)
             ExportedTranscript(exported.data, exported.filename, exported.contentType)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             _actionError.value = error.message
             null
@@ -2219,6 +2237,8 @@ class Session(
         val connectionId = _connection.value?.id
         try {
             body(activeClient)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: APIError) {
             if (error.isUnauthorized) {
                 gate.withLock {
