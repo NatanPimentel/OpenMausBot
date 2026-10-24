@@ -73,6 +73,22 @@ function desktopCommandEnvironment(source = process.env, additions = {}) {
   return env;
 }
 
+const X_DISPLAY = /^:[0-9]{1,3}$/;
+const DEFAULT_AGENT_DISPLAY = ":98";
+
+/** `browserEngine.agentDisplay` of config.json: the X display agents use, never the person's own. */
+function configuredAgentDisplay(config) {
+  const display = config?.browserEngine?.agentDisplay;
+  return typeof display === "string" && X_DISPLAY.test(display) ? display : DEFAULT_AGENT_DISPLAY;
+}
+
+/** The session environment of the agents' own X display: the person's Wayland or X seat is not reachable from it. */
+function agentScreenEnvironment(source, display) {
+  const env = { ...source, DISPLAY: display, XDG_SESSION_TYPE: "x11" };
+  delete env.WAYLAND_DISPLAY;
+  return env;
+}
+
 function commandFailure(code, message, details = {}) {
   const error = new Error(message);
   error.code = code;
@@ -735,7 +751,9 @@ module.exports = {
   CERTIFIED_DRIVER_VERSION,
   CERTIFIED_MANIFEST_SCHEMA,
   DRIVER_FILE_IDENTITY_KEYS,
+  agentScreenEnvironment,
   captureDriverFileIdentity,
+  configuredAgentDisplay,
   desktopCommandEnvironment,
   discoverLinuxCuaDriver,
   inspectLinuxCuaDriver,

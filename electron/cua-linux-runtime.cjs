@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   CERTIFIED_DRIVER_VERSION,
+  agentScreenEnvironment,
   desktopCommandEnvironment,
   inspectLinuxCuaDriver,
   sameDriverFileIdentity,
@@ -498,7 +499,8 @@ function createLinuxCuaRuntime({
   preferenceStore = createLinuxCuaPreferenceStore({ getUserData }),
   platform = process.platform,
   arch = process.arch,
-  env = process.env,
+  env: hostEnv = process.env,
+  agentDisplay = () => null,
   bundledDriverPath,
   inspect = inspectLinuxCuaDriver,
   spawnProcess = spawn,
@@ -514,6 +516,12 @@ function createLinuxCuaRuntime({
   let active = null;
   let startPromise = null;
   let enabled = false;
+  // The driver reads and clicks the agents' screen when one is configured: the person's own display is never its seat.
+  const driverEnvironment = () => {
+    const display = agentDisplay();
+    return display ? agentScreenEnvironment(hostEnv, display) : hostEnv;
+  };
+  const env = hostEnv;
   let quitting = false;
   let connection = {
     schemaVersion: CONNECTION_SCHEMA_VERSION,
@@ -648,7 +656,7 @@ function createLinuxCuaRuntime({
       unavailable("checking", "checking-driver", "Checking Cua Driver and the desktop session…");
       let inspected;
       try {
-        inspected = await inspect({ platform, arch, env, bundledDriverPath });
+        inspected = await inspect({ platform, arch, env: driverEnvironment(), bundledDriverPath });
       } catch (error) {
         return unavailable(
           "error",
@@ -682,7 +690,7 @@ function createLinuxCuaRuntime({
         );
       }
 
-      const childEnv = desktopCommandEnvironment(env, {
+      const childEnv = desktopCommandEnvironment(driverEnvironment(), {
         CUA_DRIVER_EMBEDDED: "1",
         CUA_DRIVER_HOST_BUNDLE_ID: HOST_BUNDLE_ID,
         CUA_DRIVER_PARENT_LIVENESS_STDIN: "1",

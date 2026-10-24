@@ -203,7 +203,7 @@ export class ConnectedBackend implements Backend {
   async open(request: OpenRequest): Promise<OpenedBrowser> {
     if (request.mode !== "headless") throw new Error("A connected browser already has its own windows.");
     const transport = await this.#connect(await this.#url());
-    const browser = await CdpBrowser.connect(transport, { identity: null, headless: false, permissions: false, downloadDir: null, viewport: null, ownTabsOnly: true });
+    const browser = await CdpBrowser.connect(transport, { identity: null, headless: false, permissions: false, downloadDir: null, viewport: null, ownTabsOnly: true, background: true });
     const version = versionOf((await browser.version()).product);
     let closed!: () => void;
     const exited = new Promise<void>((resolve) => { closed = resolve; });

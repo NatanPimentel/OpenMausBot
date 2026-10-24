@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const {
+  agentScreenEnvironment,
+  configuredAgentDisplay,
   desktopCommandEnvironment,
   discoverLinuxCuaDriver,
   inspectLinuxCuaDriver,
@@ -572,5 +574,19 @@ describe.skipIf(process.platform === "win32")("minimal child environment", () =>
       CUA_DRIVER_RS_UPDATE_CHECK: "false",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
     });
+  });
+});
+
+describe("the agents' screen", () => {
+  it("reads the display from config and falls back to :98 for anything else", () => {
+    expect(configuredAgentDisplay({ browserEngine: { agentDisplay: ":99" } })).toBe(":99");
+    expect(configuredAgentDisplay({ browserEngine: { agentDisplay: "evil:0" } })).toBe(":98");
+    expect(configuredAgentDisplay(null)).toBe(":98");
+  });
+
+  it("replaces the person's session with an X session on that display", () => {
+    const source = { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "wayland", HOME: "/home/x" };
+    expect(agentScreenEnvironment(source, ":98")).toEqual({ DISPLAY: ":98", XDG_SESSION_TYPE: "x11", HOME: "/home/x" });
+    expect(source.DISPLAY).toBe(":0");
   });
 });

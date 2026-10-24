@@ -336,6 +336,16 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
     expect(context.spawnProcess).not.toHaveBeenCalled();
   });
 
+  it("points the driver at the agents' screen, never the person's Wayland or X display", async () => {
+    const context = harness({ session: "wayland", runtimeOptions: { agentDisplay: () => ":98" } });
+    await context.runtime.enable();
+    expect(context.inspect.mock.calls[0][0].env).toMatchObject({ DISPLAY: ":98", XDG_SESSION_TYPE: "x11" });
+    expect(context.inspect.mock.calls[0][0].env.WAYLAND_DISPLAY).toBeUndefined();
+    const { env } = context.spawnProcess.mock.calls[0][2];
+    expect(env).toMatchObject({ DISPLAY: ":98", XDG_SESSION_TYPE: "x11" });
+    expect(env.WAYLAND_DISPLAY).toBeUndefined();
+  });
+
   it("coalesces starts, verifies a private daemon, and publishes a strict ready descriptor", async () => {
     const context = harness();
     const [first, second] = await Promise.all([context.runtime.enable(), context.runtime.enable()]);

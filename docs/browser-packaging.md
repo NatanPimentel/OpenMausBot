@@ -88,6 +88,20 @@ the desktop app and Chrome 144+ with remote debugging on at
 `chrome://inspect/#remote-debugging`; on Cloud and servers profiles stay
 built-in. Details: [the browser engine plan, step 5](plans/browser-engine.md).
 
+My Chrome never takes the person's screen. Each bot gets its own tab in that
+Chrome, opened behind the window in front (`Target.createTarget` with
+`background: true`) and never activated: no `Page.bringToFront`, no window
+focus, no system input. Clicks, typing and pictures go through the tab's own
+DevTools session, which works while the tab is hidden. Two `browserEngine`
+settings in `config.json` choose where bots work:
+
+- `myChromeTarget`: `"background-tab"` (default) uses the person's Chrome as
+  above; `"own-browser"` gives My Chrome profiles a browser of the bot's own,
+  a window on the agents' screen.
+- `agentDisplay`: that screen, `":98"` when unset. On Linux the desktop
+  driver that reads and clicks apps also runs on this display, not on the
+  person's own.
+
 ## What a bot's browser can reach
 
 Every Chrome OpenMausBot launches for a bot sends all of its connections
