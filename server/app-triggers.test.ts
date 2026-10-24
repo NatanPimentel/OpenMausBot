@@ -167,7 +167,7 @@ describe("AppTriggerManager", () => {
     const triggers = manager();
     const trigger = await gmailTrigger(triggers, { from: "acme.com", notSubject: [] } as never);
     expect(triggers.get(trigger.id)?.filter).toEqual({ from: "acme.com" });
-    await expect(triggers.update(trigger.id, { filter: { notSubject: new Array(21).fill("x") } })).rejects.toThrow(/notSubject/);
+    await expect(triggers.update(trigger.id, { filter: { notSubject: Array.from({ length: 21 }, () => "x") } })).rejects.toThrow(/notSubject/);
   });
 
   it("reconciles: a lost copy is made again, one nobody wants is removed, and on/off is matched", async () => {
