@@ -111,13 +111,36 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     expect(listed.tools.map((tool) => tool.name)).toEqual(TOOL_LIST.map((tool) => tool.name));
   });
 
-  it("keeps a profile on the person's own Chrome on agent-browser: its prompt, and no sites list from either", () => {
+  it("runs a profile on the person's own Chrome on the new engine, and no sites list from either", () => {
     const { host } = setup("chrome");
     expect(host.browserSystemPrompt(undefined)).toBe(CHROME_BROWSER_SYSTEM_PROMPT);
     expect(host.browserSystemPrompt("work")).toBe(CHROME_BROWSER_SYSTEM_PROMPT);
-    expect(host.browserSystemPrompt("mine")).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
+    expect(host.browserSystemPrompt("mine")).toBe(CHROME_BROWSER_SYSTEM_PROMPT);
     expect(host.signedInSitesRefusal("mine")).toContain("your own Chrome");
     expect(host.signedInSitesRefusal("work")).toContain("does not list signed-in sites yet");
+  });
+
+  it("opens the person's own Chrome as a background tab of its own, even on agent-browser", async () => {
+    const { cfg, host } = setup("agent-browser");
+    cfg.browserEngine = { engine: "agent-browser", attachCdpUrl: "9333" };
+    const mine = await host.browserIntegration("scout", "mine", turn);
+    expect(mine?.spec.command).toBe("omb-cdp");
+    expect(mine?.spec.args).toEqual(["mychrome:scout"]);
+    expect(mine?.spec.env).toEqual({ AGENT_BROWSER_CDP: "9333" });
+    const other = await host.browserIntegration("rival", "mine", turn);
+    expect(other?.spec.args).toEqual(["mychrome:rival"]);
+    expect(host.browserSystemPrompt("mine")).toBe(CHROME_BROWSER_SYSTEM_PROMPT);
+    expect(host.browserSystemPrompt("work")).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
+  });
+
+  it("gives the bot a browser of its own on the agents' screen when the target says so", async () => {
+    const { cfg, host } = setup("agent-browser");
+    cfg.browserEngine = { engine: "agent-browser", myChromeTarget: "own-browser", agentDisplay: ":97" };
+    expect(host.usesMyChrome("mine")).toBe(false);
+    const spec = host.browserSessionSpec("/fake/agent-browser", "bot-scout", "mine");
+    expect(spec.env).toMatchObject({ DISPLAY: ":97", AGENT_BROWSER_HEADED: "1" });
+    expect(spec.env.AGENT_BROWSER_CDP).toBeUndefined();
+    expect(host.browserSessionSpec("/fake/agent-browser", "bot-scout", "work").env.DISPLAY).toBeUndefined();
   });
 
   it("says in the status which engine runs the bots' browsers", () => {

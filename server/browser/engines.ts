@@ -8,12 +8,13 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime, BrowserSpawnSpec } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
-import { LocalBackend } from "./backends.ts";
+import { ConnectedBackend, LocalBackend } from "./backends.ts";
+import { devToolsWebSocket } from "./cdp/transport.ts";
 import { sandboxDisabled } from "./chrome/host-setup.ts";
 import type { HostKind } from "./chrome/flags.ts";
 import { ChromeLauncher } from "./chrome/launcher.ts";
 import { ProcessRegistry, sweep } from "./chrome/processes.ts";
-import { browserRoot } from "./chrome/profile.ts";
+import { browserRoot, profileKind } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
 import type { Download } from "./cdp/downloads.ts";
@@ -32,11 +33,13 @@ export function chromeTarget(session: string, spec: { command: string; args?: re
 }
 
 /** The profile a bot's browser is on the new engine: its own, a shared one, or a temporary one. */
-export function profileKey(botId: string, session: string, profile: { guest: boolean; partitionId: string | null }): string {
+export function profileKey(botId: string, session: string, profile: { guest: boolean; partitionId: string | null; myChrome?: boolean }): string {
+  if (profile.myChrome) return `mychrome:${botId}`;
   if (profile.guest) return `temp:${session}`;
   return profile.partitionId ? `shared:${profile.partitionId}` : `bot:${botId}`;
 }
 
+const DEFAULT_CDP_PORT = "9222";
 const MAX_RUNNING: Record<HostKind, number> = { desktop: 6, server: 4, container: 2 };
 const SWEEP_MS = 60_000;
 
@@ -46,6 +49,8 @@ export interface ChromeEngineOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   egressPort(key: string): Promise<number>;
+  /** The Chrome My Chrome profiles attach to: a port or DevTools address; null tries 9222, where Chrome's remote debugging usually listens. */
+  attachUrl?(): string | null;
   idleMs(): number;
   egressNotice(key: string): string | null;
   log?: (line: string) => void;
@@ -90,10 +95,11 @@ export class ChromeEngine {
       sandbox,
       ...(options.log ? { log: options.log } : {}),
     });
+    const connected = new ConnectedBackend("my-chrome", () => devToolsWebSocket(options.attachUrl?.() ?? DEFAULT_CDP_PORT));
     const maxRunning = Number(env.OMB_BROWSER_MAX_RUNNING) || MAX_RUNNING[options.host];
     this.service = new BrowserService({
       dataDir: options.dataDir,
-      backend: () => backend,
+      backend: (key) => profileKind(key) === "mychrome" ? connected : backend,
       maxRunning,
       idleMs: options.idleMs,
       egressNotice: options.egressNotice,
@@ -104,9 +110,9 @@ export class ChromeEngine {
   }
 
   /** The spec a session gets on the new engine, remembered so its live view finds the profile. */
-  spec(session: string, key: string): { command: string; args: string[]; env: Record<string, string> } {
+  spec(session: string, key: string, env: Record<string, string> = {}): { command: string; args: string[]; env: Record<string, string> } {
     this.#targets.set(session, key);
-    return { command: CHROME_ENGINE, args: [key], env: {} };
+    return { command: CHROME_ENGINE, args: [key], env };
   }
 
   target(session: string): BrowserTarget | null {

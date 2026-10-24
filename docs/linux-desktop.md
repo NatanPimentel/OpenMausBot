@@ -171,6 +171,9 @@ starts with `--no-overlay`, so Cua's decorative full-screen X11 cursor surface i
 uses Electron software rendering on Linux to avoid the reproduced NVIDIA/libGLES GPU-process failure that could
 leave an invisible focused app window receiving input.
 
+The owned daemon runs on the agents' X display (`browserEngine.agentDisplay` in `config.json`, `:98` when unset) with
+`XDG_SESSION_TYPE=x11` and no `WAYLAND_DISPLAY`, so bots reading or clicking apps never act on your own screen.
+
 Cua actions use a private logical cursor. With the decorative overlay disabled, `move_cursor` does not move the
 user's physical pointer; approved click and typing actions still target the requested window, while the user's own
 mouse remains under their control.

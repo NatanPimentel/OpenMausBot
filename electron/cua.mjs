@@ -27,6 +27,7 @@ const {
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
 const { linuxLocalControlSupport } = require("./capabilities.cjs");
+const { configuredAgentDisplay } = require("./cua-linux.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
 const STANDALONE_SOCKET = path.join(
@@ -85,6 +86,14 @@ function ensureLinuxRuntime() {
         getUserData: () => app.getPath("userData"),
         connectionStore,
         bundledDriverPath,
+        agentDisplay: () => {
+          try {
+            const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+            return configuredAgentDisplay(JSON.parse(fs.readFileSync(path.join(dataDir, "config.json"), "utf8")));
+          } catch {
+            return configuredAgentDisplay(null);
+          }
+        },
         onChange: (connection) => stateListener(connection),
       });
     } catch (error) {

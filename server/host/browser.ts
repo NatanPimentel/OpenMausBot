@@ -35,7 +35,7 @@ import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { LAUNCHER_SECCOMP_FD, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
-import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
+import { agentDisplay, browserEngineKind, myChromeTarget, type BrowserEngineKind } from "../browser/config.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
@@ -114,6 +114,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     dataDir: DATA_DIR,
     host,
     egressPort: (key) => browserEgress.open(key),
+    attachUrl: () => browserEngineAttachCdpUrl(cfg),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     log: (line) => console.warn(line),
@@ -146,7 +147,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const browserSweep = {
     start() {
       agentBrowserSweep.start();
-      chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+      chromeEngine.start({ inUse: chromeEngineInUse(), prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => agentBrowserSweep.closeAll(),
@@ -208,7 +209,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return DESKTOP_MANAGED || browserEngineAttachCdpUrl(cfg) !== null;
   }
   function usesMyChrome(profileId: string | undefined): boolean {
-    return Boolean(profileId) && myChromeAvailable()
+    return Boolean(profileId) && myChromeAvailable() && myChromeTarget(cfg) === "background-tab"
       && cfg.browserProfiles?.some((profile) => profile.id === profileId && profile.browser === "chrome") === true;
   }
   function browserSessionSpec(binaryPath: string, session: string, profile: string | undefined, egressPort?: number) {
@@ -218,24 +219,36 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       env: { ...process.env, PATH: augmentedPath() },
       launcher: chromeLauncher.env(),
       ...(usesMyChrome(profile) ? { attach: attachCdpUrl ? { cdpUrl: attachCdpUrl } : {} } : {}),
+      ...(ownBrowserOnAgentScreen(profile) ? { display: agentDisplay(cfg) } : {}),
     });
+  }
+  /** A My Chrome profile whose target is the bot's own browser: a window on the agents' screen, never the person's. */
+  function chromeEngineInUse(): boolean {
+    return browserEngineKind(cfg) === "chrome" || (cfg.browserProfiles ?? []).some((profile) => usesMyChrome(profile.id));
+  }
+  function ownBrowserOnAgentScreen(profileId: string | undefined): boolean {
+    return Boolean(profileId) && myChromeAvailable() && myChromeTarget(cfg) === "own-browser"
+      && cfg.browserProfiles?.some((profile) => profile.id === profileId && profile.browser === "chrome") === true;
   }
   function browserProfileIdOf(profile: string | undefined): string | undefined {
     const target = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
     return target?.profileId ?? profile;
   }
-  /** The new engine runs a bot's browser when the flag is on, except in the person's own Chrome. */
+  /** The new engine runs a bot's browser when the flag is on, and always in the person's own Chrome: agent-browser brings tabs to the front. */
   function onChrome(profile: string | undefined): boolean {
-    return browserEngineKind(cfg) === "chrome" && !usesMyChrome(browserProfileIdOf(profile));
+    return browserEngineKind(cfg) === "chrome" || usesMyChrome(browserProfileIdOf(profile));
   }
   function chromeSpec(botId: string, profile: string | undefined, audience: Audience): { session: string; spec: ReturnType<ChromeEngine["spec"]> } {
     const suffix = noted(audience);
     const session = sessionFor(botId, profile, suffix);
     const target = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
-    return { session, spec: chromeEngine.spec(session, profileKey(botId + suffix, session, { guest: profile === "guest", partitionId: target ? target.partitionId + suffix : null })) };
+    const myChrome = usesMyChrome(browserProfileIdOf(profile));
+    const key = profileKey(botId + suffix, session, { guest: profile === "guest", partitionId: target ? target.partitionId + suffix : null, myChrome });
+    return { session, spec: chromeEngine.spec(session, key, myChrome ? { AGENT_BROWSER_CDP: browserEngineAttachCdpUrl(cfg) ?? "9222" } : {}) };
   }
   /** Chrome for the new engine, the installed agent-browser otherwise. */
   function browserReady(profile: string | undefined): boolean {
+    if (usesMyChrome(browserProfileIdOf(profile))) return true;
     return onChrome(profile) ? chromeEngine.summary().kind === "engine" : browserEngineStatus().kind === "ready";
   }
   function turnIntegration(botId: string, session: string, turn: { threadId: string; generation: string }) {
@@ -312,8 +325,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         if (!closed) console.warn(`browser ${session}: could not close it after the browser engine changed`);
       });
     }
-    if (browserEngineKind(cfg) !== "chrome") void chromeEngine.service.closeAll().catch(() => undefined);
-    chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+    if (!chromeEngineInUse()) void chromeEngine.service.closeAll().catch(() => undefined);
+    chromeEngine.start({ inUse: chromeEngineInUse(), prepare: builtInBrowserEnabled(cfg) });
   }
   function browserRunning(session: string, spec: Spec | undefined): boolean {
     if (chromeTarget(session, spec)) return chromeEngine.service.runs(session);
@@ -429,7 +442,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (refusal) return { status: 409, error: refusal };
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
-  /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
+  /** What Settings shows of the engine that runs bots' browsers here. */
   function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind } {
     if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, engine: "agent-browser" };
     return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, engine: "chrome" };

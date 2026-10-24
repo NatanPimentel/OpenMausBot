@@ -119,6 +119,16 @@ export function webSocketTransport(url: string, { timeoutMs = 15_000 }: { timeou
   });
 }
 
+/** The browser WebSocket of a Chrome started with --remote-debugging-port: `target` is a port, an http(s) address or the WebSocket itself. */
+export async function devToolsWebSocket(target: string, { timeoutMs = 5_000, fetchJson = fetch }: { timeoutMs?: number; fetchJson?: typeof fetch } = {}): Promise<string> {
+  if (/^wss?:\/\//i.test(target)) return target;
+  const origin = /^[0-9]{1,5}$/.test(target) ? `http://127.0.0.1:${target}` : new URL(target).origin;
+  const answer = await fetchJson(`${origin}/json/version`, { signal: AbortSignal.timeout(timeoutMs) });
+  const url: unknown = ((await answer.json()) as { webSocketDebuggerUrl?: unknown }).webSocketDebuggerUrl;
+  if (typeof url !== "string" || !/^wss?:\/\//i.test(url)) throw new Error(`No Chrome with remote debugging answers at ${origin}.`);
+  return url;
+}
+
 export interface SentCommand {
   method: string;
   sessionId: string | null;

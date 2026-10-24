@@ -576,6 +576,8 @@ export function agentBrowserIntegration(input: {
   /** The person's own Chrome: agent-browser auto-connects (DevToolsActivePort, then ports 9222/9229) or uses `cdpUrl`, which
    * comes only from workspace config, never the ambient environment. */
   attach?: { cdpUrl?: string };
+  /** An X display: the browser opens a window there instead of running headless, and sees no other display. */
+  display?: string;
   /** The Chrome OMB prepared for the engine to start (server/browser/chrome/launcher.ts); unused when attaching. */
   launcher?: Record<string, string>;
   dataDir?: string;
@@ -604,7 +606,10 @@ export function agentBrowserIntegration(input: {
     env.AGENT_BROWSER_RESTORE = browserRestoreKey(input.session);
     env.AGENT_BROWSER_RESTORE_SAVE = input.persistent === false ? "never" : "auto";
     if (input.persistent !== false) env.AGENT_BROWSER_PROFILE = browserProfileDirectory(input.session, input.dataDir);
-    if (input.headless !== false || displayless) {
+    if (input.display) {
+      env.DISPLAY = input.display;
+      env.AGENT_BROWSER_HEADED = "1";
+    } else if (input.headless !== false || displayless) {
       env.AGENT_BROWSER_HEADLESS = "1";
       env.AGENT_BROWSER_HEADED = "0";
     }

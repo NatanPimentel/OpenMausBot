@@ -34,6 +34,8 @@ export interface BrowserOptions {
   handleAuth?: boolean;
   /** The person's own browser: only tabs this driver opens are attached to; theirs are left alone. */
   ownTabsOnly?: boolean;
+  /** Tabs open behind the person's window and are never brought forward: Input.dispatch* and Page.captureScreenshot reach a hidden tab through its own session. */
+  background?: boolean;
   timeoutMs?: number;
 }
 
@@ -67,7 +69,7 @@ export class CdpBrowser implements PageHost {
     this.mac = (options.platform ?? process.platform) === "darwin";
     const identity = options.identity ? identityOverride(options.identity, options.acceptLanguage) : null;
     const headless = options.headless ?? true;
-    this.setup = { identity, focusEmulation: headless, interceptFileChooser: headless, handleAuth: options.handleAuth === true, noPasskeys: headless };
+    this.setup = { identity, focusEmulation: headless || options.background === true, interceptFileChooser: headless, handleAuth: options.handleAuth === true, noPasskeys: headless };
     this.#viewport = options.viewport === undefined ? (headless ? VIEWPORT : null) : options.viewport;
     this.downloads = options.downloadDir
       ? new Downloads(connection.root, options.downloadDir, { ownerOf: (frameId) => this.#ownerOf(frameId), ...(options.downloadLimits ? { limits: options.downloadLimits } : {}) })
@@ -306,7 +308,10 @@ export class CdpBrowser implements PageHost {
   }
 
   async newPage(url = "about:blank", { timeoutMs = 15_000 }: { timeoutMs?: number } = {}): Promise<CdpPage> {
-    const { targetId } = await this.connection.root.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+    const { targetId } = await this.connection.root.send<{ targetId: string }>("Target.createTarget", {
+      url: "about:blank",
+      ...(this.#options.background ? { background: true } : {}),
+    });
     if (this.#options.ownTabsOnly) await this.connection.root.send("Target.attachToTarget", { targetId, flatten: true });
     const page = await this.waitForPage((candidate) => candidate.targetId === targetId, timeoutMs);
     this.#active = page;
@@ -317,6 +322,10 @@ export class CdpBrowser implements PageHost {
   /** Input reaches only the tab in front: a person switching tabs does the same. */
   async bringToFront(page: CdpPage): Promise<void> {
     if (this.#active === page) return;
+    if (this.#options.background) {
+      this.#active = page;
+      return;
+    }
     await page.session.send("Page.bringToFront");
     this.#active = page;
     await this.#fitWindow(page);
