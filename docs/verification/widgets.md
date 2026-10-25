@@ -68,6 +68,15 @@ folds the same way: that button is the Form's submit, so a second tap, or a
 second press after a reload or from the phone, is refused as already
 answered.
 
+The `fleetForm` shape before the press, and after it with Details open, on a
+1280px and a 390px viewport (pt-BR):
+
+![A form with two choices, a note and a Send button](evidence/widgets/answered-form-before-desktop.png)
+
+![The answered form: a line with the time and the choices, and the read-only card whose Send button became the time it was answered](evidence/widgets/answered-form-details-desktop.png)
+
+![The same answered form on a phone-width viewport](evidence/widgets/answered-form-details-phone.png)
+
 What it looks like when the recipe passes: the list in Midnight
 (`evidence/widgets/list-midnight.png`), the form before the press
 (`evidence/widgets/form-midnight.png`), and the settled form's Details in
