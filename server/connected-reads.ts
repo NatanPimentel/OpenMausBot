@@ -367,12 +367,20 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           throw error;
         });
         const transport = await opened;
-        const answer = await deps.relay({
-          jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
-          params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: slug, arguments: args }] } },
-        }, transport, signal);
-        if (answer.status !== 200) throw new Error(`${slug} answered HTTP ${answer.status}`);
-        return toolData(slug, parseMcpResponse(new TextDecoder().decode(answer.bytes), CALL_ID));
+        const ask = async (account?: string): Promise<string> => {
+          const answer = await deps.relay({
+            jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
+            params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: slug, arguments: args, ...(account ? { account } : {}) }] } },
+          }, transport, signal);
+          if (answer.status !== 200) throw new Error(`${slug} answered HTTP ${answer.status}`);
+          return new TextDecoder().decode(answer.bytes);
+        };
+        let raw = await ask();
+        // Local mod (Imobiturbo, 25/10/2026): with two accounts of the same app in Composio a read without an account fails
+        // ("Multiple gmail accounts connected"); retry once with the first account listed (the default).
+        const many = /Multiple \w+ accounts connected[^"]*?\\*"([^"\\]+)\\*"/.exec(raw);
+        if (many) raw = await ask(many[1]);
+        return toolData(slug, parseMcpResponse(raw, CALL_ID));
       } catch (error) {
         if (error instanceof SourceError) throw error;
         if (gone && error instanceof ToolAnswerError && gone(error.message)) return GONE;
