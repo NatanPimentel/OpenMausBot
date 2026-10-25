@@ -366,6 +366,22 @@ describe("prepareWidgetPress", () => {
     expect(payloadOf(fake, list.id).settled).toEqual({ ref: "confirm", label: "Merge the two ready", tone: "confirm", at: expect.any(Number), sendId: SEND });
   });
 
+  it("settles on the plain button a Form is sent with, and refuses a second send with other answers", () => {
+    const fake = fakeStore();
+    const form = shown(fake, "fleetForm");
+    const send = widgetActions(form.widget!.root).find((entry) => entry.label === "Send")!;
+    const first = prepareWidgetPress(fake.store, THREAD, { messageId: form.id, ref: send.ref, values: { sandberg: "delete", bell: "merge", extra: "" } }, SEND);
+    expect(first).toMatchObject({ ok: true, settles: true, text: "Send\nSandberg: Delete for good\nBell into Brunson: Merge (recommended)" });
+    if (!first.ok) throw new Error(first.error);
+    first.settle();
+    expect(payloadOf(fake, form.id).settled).toEqual({
+      ref: send.ref, label: "Send", tone: "submit", at: expect.any(Number), sendId: SEND, values: { sandberg: "delete", bell: "merge", extra: "" },
+    });
+    const again = { messageId: form.id, ref: send.ref, values: { sandberg: "delete", bell: "merge", extra: "Also rename Tim." } };
+    expect(prepareWidgetPress(fake.store, THREAD, again, "send-another-0123456789")).toEqual({ ok: false, status: 409, error: "This was already answered." });
+    expect(fake.patchMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("sends a choice answered in the person's own words, and keeps those words on the settled widget", () => {
     const fake = fakeStore();
     const row = shown(fake, "dinnerChoice");

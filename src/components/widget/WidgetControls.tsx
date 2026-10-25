@@ -16,6 +16,7 @@ export interface WidgetForm {
   chooseOther: (name: string) => void;
   setOther: (name: string, text: string) => void;
   locked: boolean;
+  answered?: { ref: string; text: string };
   invalid?: string;
   errorId: string;
   fields: ReadonlyMap<string, WidgetField>;
@@ -97,6 +98,14 @@ export function WidgetButton({ actionRef, label, look, iconStart, iconEnd, block
   const entry = form.actions.get(actionRef);
   const pending = form.pendingRef === actionRef;
   const sent = form.sentRef === actionRef;
+  if (form.answered?.ref === actionRef) {
+    return (
+      <span data-widget-answered={actionRef} className={cn(BUTTON, "cursor-default bg-ink/[0.04] text-ink-secondary", block && "flex w-full")}>
+        <Check aria-hidden="true" size={14} className="shrink-0 text-success" />
+        <span className="min-w-0 truncate">{form.answered.text}</span>
+      </span>
+    );
+  }
   return (
     <button
       type="button"

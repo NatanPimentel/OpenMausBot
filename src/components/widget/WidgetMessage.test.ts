@@ -12,6 +12,9 @@ import { t } from "@/lib/i18n";
 import { WIDGET_SAMPLES } from "../../../shared/widget-samples";
 import { parseWidgetInput, widgetActions, type WidgetPayload, type WidgetRoot } from "../../../shared/widget";
 import { WidgetMessage } from "./WidgetMessage";
+import { widgetAnsweredAt } from "./widget-answer";
+import { widgetDaysCaption } from "./WidgetDayPicker";
+import { widgetTimeLabel } from "./WidgetTimePicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,6 +64,14 @@ function pickTime(name: string, time: string) {
 }
 
 const daysOn = () => all<HTMLButtonElement>('[data-day][aria-pressed="true"]').map((day) => day.dataset.day);
+const dateLabel = (year: number, month: number, day: number) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(year, month - 1, day));
+
+/** The folded line of a card answered just now: its stamp, then what was sent. */
+function answeredJustNow(): string[] {
+  const [stamp, ...parts] = find('[data-ask-card="settled"]')!.textContent!.replace(t("question.details"), "").split(" · ");
+  expect(stamp!.startsWith(t("widget.answeredAt", { time: "" }))).toBe(true);
+  return parts;
+}
 
 function emptyTimeForm(): WidgetRoot {
   const parsed = parseWidgetInput({
@@ -270,7 +281,7 @@ describe("a settled widget", () => {
   it("folds to one tick line with no actions, and Details shows the card read-only", () => {
     mount(settled("confirm", "Create routine"));
     const line = find('[data-ask-card="settled"]')!;
-    expect(line.textContent).toBe(`Create routine${t("question.details")}`);
+    expect(line.textContent).toBe(`${widgetAnsweredAt(2)} · Create routine${t("question.details")}`);
     expect(line.querySelector("svg.lucide-check")).not.toBeNull();
     expect(find("[data-widget]")).toBeNull();
     expect(find("[data-widget-ref]")).toBeNull();
@@ -352,7 +363,7 @@ describe("pressing", () => {
 
     await act(async () => { answer(reply(200, { ok: true })); });
     const line = find('[data-ask-card="settled"]')!;
-    expect(line.textContent).toBe(`Create routine${t("question.details")}`);
+    expect(answeredJustNow()).toEqual([widgetDaysCaption("mon,tue,wed,thu,fri,sat"), dateLabel(2026, 10, 14), widgetTimeLabel("08:30")]);
     expect(line.querySelector("svg.lucide-check")).not.toBeNull();
     expect(find("[data-widget]")).toBeNull();
     act(() => button(t("question.details"))!.click());
@@ -363,7 +374,7 @@ describe("pressing", () => {
     expect(find('[data-widget-ref="confirm"]')).toBeNull();
 
     mount(row(sample("routineForm"), { settled: { ref: "confirm", label: "Create routine", tone: "confirm", at: 2, values: { days: "mon,tue,wed,thu,fri,sat", starts: "2026-10-14", at: "8:30", report: "", stopOnRed: false } } }));
-    expect(find('[data-ask-card="settled"]')!.textContent).toContain("Create routine");
+    expect(find('[data-ask-card="settled"]')!.textContent).toContain(widgetTimeLabel("08:30"));
     expect(field<HTMLButtonElement>("at").value).toBe("08:30");
   });
 
@@ -420,6 +431,46 @@ describe("pressing", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(posted().body.widgetAction.ref).toBe("confirm");
+  });
+
+  it("locks a form sent by its plain button at once, sends a double tap once, and comes back answered after a reload", async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    mount(row(sample("fleetForm")));
+    const radio = (value: string) => all<HTMLInputElement>('input[type="radio"]').find((input) => input.value === value)!;
+    const controls = () => all<HTMLInputElement | HTMLTextAreaElement>('input[type="radio"], textarea');
+    act(() => radio("delete").click());
+    act(() => radio("merge").click());
+    type(field<HTMLTextAreaElement>("extra"), "Also rename Tim.");
+    const send = button("Send")!;
+    expect(send.className).toContain("bg-accent");
+    await act(async () => {
+      send.click();
+      send.click();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const ref = posted().body.widgetAction.ref;
+    expect(posted().body.widgetAction).toEqual({ messageId: "w1", ref, rev: 0, values: { sandberg: "delete", bell: "merge", extra: "Also rename Tim." } });
+    expect(find('[data-widget="w1"]')!.getAttribute("data-widget-state")).toBe("sending");
+    expect(button("Send")!.disabled).toBe(true);
+    expect(controls().every((control) => control.disabled)).toBe(true);
+
+    await act(async () => { answer(reply(202, { ok: true })); });
+    expect(answeredJustNow()).toEqual(["Delete for good", "Merge (recommended)", "Also rename Tim."]);
+    expect(find("[data-widget]")).toBeNull();
+    act(() => button(t("question.details"))!.click());
+    expect(controls().length).toBeGreaterThan(0);
+    expect(controls().every((control) => control.disabled)).toBe(true);
+    expect(button("Send")).toBeUndefined();
+    expect(find(`[data-widget-answered="${ref}"]`)!.textContent!.startsWith(t("widget.answeredAt", { time: "" }))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const at = Date.now();
+    act(() => root.render(null));
+    mount(row(sample("fleetForm"), { settled: { ref, label: "Send", tone: "submit", at, sendId: "s1", values: { sandberg: "delete", bell: "merge", extra: "Also rename Tim." } } }));
+    expect(find('[data-ask-card="settled"]')!.textContent).toBe(`${widgetAnsweredAt(at)} · Delete for good · Merge (recommended) · Also rename Tim.${t("question.details")}`);
+    expect(find("[data-widget]")).toBeNull();
+    expect(button("Send")).toBeUndefined();
   });
 
   it("leaves a click on a row inside a row, or on a link in its Markdown, to that control", async () => {
@@ -619,7 +670,7 @@ describe("pressing", () => {
     mount(row(sample("routineForm")));
     pickTime("at", "06:00");
     await press(button("Create routine")!);
-    expect(find('[data-ask-card="settled"]')!.textContent).toContain("Create routine");
+    expect(answeredJustNow()).toContain(widgetTimeLabel("06:00"));
     mount(row(sample("routineForm"), { rev: 1 }));
     expect(find('[data-ask-card="settled"]')).toBeNull();
     expect(find('[data-widget="w1"]')!.getAttribute("data-widget-state")).toBe("live");

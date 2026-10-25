@@ -503,6 +503,7 @@ interface Context {
   nodes: number;
   images: number;
   fields: Set<string>;
+  rawButtons: Map<WidgetNode, Record<string, unknown>>;
 }
 
 function typeOf(raw: Record<string, unknown>): string {
@@ -538,7 +539,10 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
     const value = read(source[key], `${path}.${key}`);
     if (value !== undefined) node[key] = value;
   }
-  if (type === "Button") node.style = buttonStyle(raw);
+  if (type === "Button") {
+    node.style = buttonStyle(raw);
+    context.rawButtons.set(node, raw);
+  }
   if (type === "Icon") node.name ??= "dot";
   if (type === "Progress") {
     const max = typeof raw.max === "number" && Number.isFinite(raw.max) && raw.max > 0 ? raw.max : undefined;
@@ -572,6 +576,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
     const childSlot = spec.children === "one" ? "any" : spec.children;
     node.children = kept.map((child, index) => normalize(child, `${path}.children[${index}]`, depth + 1, childSlot, context));
   }
+  if (type === "Form") submitWithOwnButtons(node, context);
   if (type === "ListView") {
     if (typeof node.name === "string") selectable(node, raw, path, context);
     else {
@@ -582,6 +587,20 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   }
   if (type === "ListViewItem" && slot !== "items") delete node.value;
   return node;
+}
+
+/** A Form is sent by its submit Button, and a model often draws that send as a plain button with its own action. In a
+ * Form with no submit Button, each button that is pressed (not a link, not disabled) becomes one, so it answers the
+ * card once instead of leaving it open to the same answer again. */
+function submitWithOwnButtons(form: WidgetNode, context: Context): void {
+  const buttons: WidgetNode[] = [];
+  walk(form, (node) => { if (node.type === "Button") buttons.push(node); });
+  if (buttons.some((button) => button.submit === true)) return;
+  for (const button of buttons) {
+    if (button.disabled === true || !isRecord(button.onClickAction) || CLIENT_ACTION(button.onClickAction as unknown as WidgetAction)) continue;
+    button.submit = true;
+    button.style = buttonStyle({ ...context.rawButtons.get(button), submit: true });
+  }
 }
 
 /** A list with a `name`: each row gets a distinct `value` (its own, else the
@@ -637,7 +656,7 @@ export function parseWidgetInput(value: unknown): ParsedWidgetInput {
   if (bytes > WIDGET_LIMITS.bytes) return { ok: false, error: `widget: is ${bytes} characters of JSON; keep it under ${WIDGET_LIMITS.bytes}.` };
   try {
     const rooted = ROOT_TYPES.has(typeOf(raw)) ? raw : { type: "Card", children: [raw] };
-    const root = normalize(rooted, "widget", 1, "root", { nodes: 0, images: 0, fields: new Set() });
+    const root = normalize(rooted, "widget", 1, "root", { nodes: 0, images: 0, fields: new Set(), rawButtons: new Map() });
     const seen = new Map<string, string>();
     for (const entry of collectActions(root, true)) {
       if (!entry.label) return { ok: false, error: `widget: the ${entry.kind} at ${entry.ref} has an action but no label; give it a label (a list item takes its first Text or Title).` };

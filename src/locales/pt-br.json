@@ -5385,6 +5385,8 @@
   "widget.required": "{label} é obrigatório.",
   "widget.sending": "Enviando",
   "widget.sent": "Enviado",
+  "widget.answeredAt": "Respondido às {time}",
+  "widget.answeredOn": "Respondido em {date}",
   "widget.sendFailed": "Não foi enviado. Tente novamente.",
   "widget.choose": "Escolher",
   "widget.clear": "Limpar {label}",

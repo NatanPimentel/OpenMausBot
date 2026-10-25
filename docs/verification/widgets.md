@@ -58,10 +58,15 @@ pnpm control:omb ui console --ui $H
 Expected: the snapshot holds a `Pull requests` list with three rows and the
 buttons `Merge the two ready` and `Fix #719 first`, and a `New routine: release
 check` form with `Create routine` and `Discard`. After the click the form is
-one line, a tick and `Create routine`, and the person's message reads
-`Create routine` followed by one `Field: value` line per field. `Details`
-shows the form again, read-only, with the values that were sent. The console
-has no `error` entries.
+one line: a tick, `Answered at` and the time, then what was sent, and the
+person's message reads `Create routine` followed by one `Field: value` line per
+field. `Details` shows the form again, read-only, with the values that were
+sent. The console has no `error` entries.
+
+A Form the bot sends with a plain button of its own (the `fleetForm` sample)
+folds the same way: that button is the Form's submit, so a second tap, or a
+second press after a reload or from the phone, is refused as already
+answered.
 
 What it looks like when the recipe passes: the list in Midnight
 (`evidence/widgets/list-midnight.png`), the form before the press

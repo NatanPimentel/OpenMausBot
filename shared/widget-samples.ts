@@ -108,6 +108,25 @@ export const WIDGET_SAMPLES: Record<string, unknown> = {
     cancel: { label: "Discard", action: { type: "routine.discard" } },
   },
 
+  // A Form sent by a plain button with its own action, as models write it: parsing makes that button its submit.
+  fleetForm: {
+    type: "Card",
+    title: "Fleet changes",
+    caption: "Two decisions. The recommended one comes first in each.",
+    children: [{
+      type: "Form",
+      onSubmitAction: { type: "fleet.changes" },
+      children: [
+        { type: "Markdown", value: "**1. Sandberg, retired since Monday.** Archive takes her off the list and can be undone. Delete removes her conversations for good." },
+        { type: "RadioGroup", name: "sandberg", label: "Sandberg", options: [{ label: "Archive (recommended)", value: "archive" }, { label: "Delete for good", value: "delete" }, { label: "Leave as is", value: "keep" }] },
+        { type: "Markdown", value: "**2. Merge Bell into Brunson.** Both sort the sales inbox and compete for the same queue." },
+        { type: "RadioGroup", name: "bell", label: "Bell into Brunson", options: [{ label: "Merge (recommended)", value: "merge" }, { label: "Keep apart", value: "apart" }] },
+        { type: "Textarea", name: "extra", label: "Anything else (optional)" },
+        { type: "Button", label: "Send", onClickAction: { type: "fleet.send" } },
+      ],
+    }],
+  },
+
   // what a bot shows for "help me book a call": every field labels itself
   bookCall: {
     type: "Card",

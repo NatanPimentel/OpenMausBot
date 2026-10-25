@@ -49,10 +49,10 @@ Expect: A list to pick from. Choosing one and confirming sends it, on the Mac an
 ### 6. Confirm a draft
 
 ```text
-Draft a two-line note to my team saying the release moved to Friday, and check with me before you send it.
+Draft a two-line note to my team saying the release moved to Friday. Don't send it yet.
 ```
 
-Expect: The draft and one short question such as "Shall I send it?", with no widget: a yes or no is answered in a word or with a 👍 or 👎 on that message ([Reactions](reactions.md)). After a 👍 the bot goes on by itself.
+Expect: A card with the draft and two buttons under it. Pressing one folds the card to a tick line.
 
 ### 7. Table
 
@@ -154,7 +154,17 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### E. bookCall
+### E. fleetForm
+
+````text
+Call show_widget with exactly this widget, change nothing, and say nothing else:
+
+```json
+{"type":"Card","title":"Fleet changes","caption":"Two decisions. The recommended one comes first in each.","children":[{"type":"Form","onSubmitAction":{"type":"fleet.changes"},"children":[{"type":"Markdown","value":"**1. Sandberg, retired since Monday.** Archive takes her off the list and can be undone. Delete removes her conversations for good."},{"type":"RadioGroup","name":"sandberg","label":"Sandberg","options":[{"label":"Archive (recommended)","value":"archive"},{"label":"Delete for good","value":"delete"},{"label":"Leave as is","value":"keep"}]},{"type":"Markdown","value":"**2. Merge Bell into Brunson.** Both sort the sales inbox and compete for the same queue."},{"type":"RadioGroup","name":"bell","label":"Bell into Brunson","options":[{"label":"Merge (recommended)","value":"merge"},{"label":"Keep apart","value":"apart"}]},{"type":"Textarea","name":"extra","label":"Anything else (optional)"},{"type":"Button","label":"Send","onClickAction":{"type":"fleet.send"}}]}]}
+```
+````
+
+### F. bookCall
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:
@@ -164,7 +174,7 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### F. spendTable
+### G. spendTable
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:
@@ -174,7 +184,7 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### G. tokenChart
+### H. tokenChart
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:
@@ -184,7 +194,7 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### H. emailDraft
+### I. emailDraft
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:
@@ -194,7 +204,7 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### I. sources
+### J. sources
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:
@@ -204,7 +214,7 @@ Call show_widget with exactly this widget, change nothing, and say nothing else:
 ```
 ````
 
-### J. kitchenSink
+### K. kitchenSink
 
 ````text
 Call show_widget with exactly this widget, change nothing, and say nothing else:

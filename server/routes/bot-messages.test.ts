@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { widgetActions } from "../../shared/widget.ts";
 import { createAgentCard } from "../chat-widgets.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -269,6 +270,24 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     expect(sent()).toHaveLength(1);
     expect(patches).toHaveBeenCalledTimes(1);
     expect(row(widgetId).widget!.settled).toMatchObject({ ref: "confirm", sendId: SEND });
+  });
+
+  it("sends a form once when its plain Send button is tapped twice, while the first is on its way and after", async () => {
+    const { threadId, state, post, show, row, sent, patches } = await fixture();
+    const widgetId = show("fleetForm");
+    const ref = widgetActions(row(widgetId).widget!.root).find((entry) => entry.label === "Send")!.ref;
+    const answer = (extra: string) => ({ messageId: widgetId, ref, values: { sandberg: "delete", bell: "merge", extra } });
+    let release = () => {};
+    state.hold = new Promise<void>((done) => { release = done; });
+    const first = post({ threadId, sendId: SEND, widgetAction: answer("") });
+    await vi.waitFor(() => expect(state.accepted).toHaveLength(1));
+    expect(await post({ threadId, sendId: OTHER_SEND, widgetAction: answer("Also rename Tim.") })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
+    release();
+    expect((await first).status).toBe(202);
+    expect(await post({ threadId, sendId: OTHER_SEND, widgetAction: answer("Also rename Tim.") })).toEqual({ status: 409, body: { error: "This was already answered." } });
+    expect(sent().map((message) => [message.text, message.replyToId])).toEqual([["Send\nSandberg: Delete for good\nBell into Brunson: Merge (recommended)", widgetId]]);
+    expect(patches).toHaveBeenCalledTimes(1);
+    expect(row(widgetId).widget!.settled).toMatchObject({ ref, label: "Send", tone: "submit", sendId: SEND, values: { sandberg: "delete", bell: "merge", extra: "" } });
   });
 
   it("leaves the widget live when the send is refused, so the person can press again", async () => {

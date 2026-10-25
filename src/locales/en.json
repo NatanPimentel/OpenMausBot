@@ -5678,6 +5678,8 @@
   "widget.required": "{label} is required.",
   "widget.sending": "Sending",
   "widget.sent": "Sent",
+  "widget.answeredAt": "Answered at {time}",
+  "widget.answeredOn": "Answered {date}",
   "widget.sendFailed": "That did not send. Try again.",
   "widget.choose": "Choose",
   "widget.clear": "Clear {label}",

@@ -5007,6 +5007,8 @@
   "widget.required": "El campo «{label}» es obligatorio.",
   "widget.sending": "Enviando",
   "widget.sent": "Enviado",
+  "widget.answeredAt": "Respondido a las {time}",
+  "widget.answeredOn": "Respondido el {date}",
   "widget.sendFailed": "No se envió. Inténtalo de nuevo.",
   "widget.choose": "Elegir",
   "widget.clear": "Borrar {label}",

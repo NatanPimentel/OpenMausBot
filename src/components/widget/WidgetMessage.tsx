@@ -16,6 +16,7 @@ import { WidgetBody } from "./WidgetBody";
 import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
 import { kids } from "./widget-style";
 import { newWidgetSendId, sendWidgetAction, type WidgetSendResult } from "./widget-send";
+import { widgetAnsweredAt, widgetAnswerSummary } from "./widget-answer";
 
 const WIDTH: Record<string, string> = { sm: "max-w-[360px]", md: "max-w-[440px]", lg: "max-w-[600px]", full: "max-w-[600px]" };
 const SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring transition-opacity";
@@ -178,6 +179,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
   const statusText = typeof status.text === "string" ? status.text : undefined;
   const headed = Boolean(title || caption || meta || statusText);
   const name = title ?? statusText ?? t("widget.aria.card");
+  const answeredAt = settled && settled.tone !== "cancel" ? widgetAnsweredAt(settled.at) : undefined;
   const form: WidgetForm = {
     uid,
     values,
@@ -197,6 +199,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       if (problem?.field === name) setProblem(undefined);
     },
     locked: isSettled || pending !== undefined,
+    answered: settled && answeredAt ? { ref: settled.ref, text: answeredAt } : undefined,
     invalid: problem?.field,
     errorId,
     fields,
@@ -262,6 +265,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
 
   if (!settled) return card;
   const detailsId = `${uid}-details`;
+  const summary = answeredAt && widgetAnswerSummary(fields.values(), settled).join(" · ");
   return (
     <AskSettledLine
       ariaLabel={name}
@@ -273,7 +277,13 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       )}
       detail={details && <div id={detailsId} className="mt-2">{card}</div>}
     >
-      <span dir="auto">{settled.label}</span>
+      {!summary ? <span dir="auto">{settled.label}</span> : (
+        <span title={`${answeredAt} · ${summary}`}>
+          <span className="text-ink-secondary">{answeredAt}</span>
+          {" · "}
+          <bdi dir="auto">{summary}</bdi>
+        </span>
+      )}
     </AskSettledLine>
   );
 }

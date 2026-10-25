@@ -298,6 +298,7 @@ describe("a radio group or a dropdown the person may answer in their own words",
     typeInto(other("size")!, "XL");
     await save();
     expect(pressed()).toEqual({ messageId: "w1", ref: "confirm", rev: 0, values: { size: "", length: "" }, other: { size: "XL" } });
+    expect(find('[data-ask-card="settled"]')!.textContent).toContain(" · XL");
   });
 
   it("adds Other as the last choice of a dropdown, and opens a field for their words when it is picked", async () => {
