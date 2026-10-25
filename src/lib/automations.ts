@@ -250,13 +250,11 @@ export function automationStatus(automation: Pick<Automation, "enabled" | "runs"
   if (automation.checkTrouble) return { state: "needs-you", reason: automation.checkTrouble, fix: SIGNED_OUT.test(automation.checkTrouble) ? "reconnect" : "run" };
   const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
   const latest = settled[0];
-  if (latest?.status === "waiting") return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
+  // Local (Imobiturbo, 25/10/2026): a run waiting on another bot, a time limit or repeated failures is the
+  // fleet's to fix, not the person's; only sign-in and usage still ask for them (questions arrive as cards).
   if (latest && isProblem(latest)) {
     const owner = ownerFix(latest);
-    if (owner) return { state: "needs-you", ...owner };
-    let streak = 0;
-    for (const run of settled) { if (!isProblem(run)) break; streak += 1; }
-    if (streak >= 2) return { state: "needs-you", reason: t("automations.reason.repeated", { count: streak }), fix: "run" };
+    if (owner && owner.fix !== "edit") return { state: "needs-you", ...owner };
   }
   return { state: "working" };
 }
