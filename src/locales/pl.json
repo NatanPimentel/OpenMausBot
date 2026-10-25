@@ -5611,6 +5611,8 @@
   "widget.required": "Pole {label} jest wymagane.",
   "widget.sending": "Wysyłanie",
   "widget.sent": "Wysłano",
+  "widget.answeredAt": "Odpowiedziano o {time}",
+  "widget.answeredOn": "Odpowiedziano {date}",
   "widget.sendFailed": "Nie udało się wysłać. Spróbuj ponownie.",
   "widget.choose": "Wybierz",
   "widget.clear": "Wyczyść: {label}",

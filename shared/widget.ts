@@ -591,15 +591,16 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
 
 /** A Form is sent by its submit Button, and a model often draws that send as a plain button with its own action. In a
  * Form with no submit Button, each button that is pressed (not a link, not disabled) becomes one, so it answers the
- * card once instead of leaving it open to the same answer again. */
+ * card once instead of leaving it open to the same answer again. A lone one is drawn as the Form's primary action. */
 function submitWithOwnButtons(form: WidgetNode, context: Context): void {
   const buttons: WidgetNode[] = [];
   walk(form, (node) => { if (node.type === "Button") buttons.push(node); });
   if (buttons.some((button) => button.submit === true)) return;
-  for (const button of buttons) {
-    if (button.disabled === true || !isRecord(button.onClickAction) || CLIENT_ACTION(button.onClickAction as unknown as WidgetAction)) continue;
+  const sends = buttons.filter((button) =>
+    button.disabled !== true && isRecord(button.onClickAction) && !CLIENT_ACTION(button.onClickAction as unknown as WidgetAction));
+  for (const button of sends) {
     button.submit = true;
-    button.style = buttonStyle({ ...context.rawButtons.get(button), submit: true });
+    if (sends.length === 1) button.style = buttonStyle({ ...context.rawButtons.get(button), submit: true });
   }
 }
 

@@ -299,6 +299,8 @@ describe("a settled widget", () => {
     expect(controls.every((control) => control.disabled)).toBe(true);
     expect(find('[data-widget-ref="confirm"]')).toBeNull();
     expect(find('[data-widget-ref="cancel"]')).toBeNull();
+    expect(find('[data-widget-answered="confirm"]')!.textContent).toBe(widgetAnsweredAt(2));
+    expect(button("Discard")).toBeUndefined();
 
     act(() => details.click());
     expect(find("[data-widget]")).toBeNull();
@@ -318,6 +320,30 @@ describe("a settled widget", () => {
     mount(row(sample("routineForm"), { settled: { ref: "confirm", label: "Create routine", tone: "confirm", at: 2 } }));
     expect(daysOn()).toEqual(["mon", "tue", "wed", "thu", "fri"]);
     expect(field<HTMLInputElement>("stopOnRed").checked).toBe(true);
+  });
+
+  it("dates an answer from another day, with the year when it is another year", () => {
+    const now = new Date(2026, 9, 24, 21, 33).getTime();
+    expect(widgetAnsweredAt(new Date(2026, 9, 24, 9, 5).getTime(), now).startsWith(t("widget.answeredAt", { time: "" }))).toBe(true);
+    const yesterday = widgetAnsweredAt(new Date(2026, 9, 23, 9, 5).getTime(), now);
+    expect(yesterday.startsWith(t("widget.answeredAt", { time: "" }))).toBe(false);
+    expect(yesterday).not.toContain("2026");
+    expect(widgetAnsweredAt(new Date(2025, 9, 23, 9, 5).getTime(), now)).toContain("2025");
+  });
+
+  it("names the button pressed when the form had more than one way to send", async () => {
+    const parsed = parseWidgetInput({ type: "Card", title: "Refund", children: [{ type: "Form", children: [
+      { type: "Textarea", name: "why", label: "Why" },
+      { type: "Row", children: [{ type: "Button", label: "Approve", onClickAction: { type: "approve" } }, { type: "Button", label: "Reject", onClickAction: { type: "reject" } }] },
+    ] }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    mount(row(parsed.value));
+    type(field<HTMLTextAreaElement>("why"), "Price too high");
+    await press(button("Reject")!);
+    expect(answeredJustNow()).toEqual(["Reject", "Price too high"]);
+    act(() => button(t("question.details"))!.click());
+    expect(find("[data-widget-answered]")!.textContent!.startsWith("Reject · ")).toBe(true);
+    expect(button("Approve")!.disabled).toBe(true);
   });
 
   it("draws a cross, not a tick, for a cancel", () => {
@@ -458,6 +484,7 @@ describe("pressing", () => {
     await act(async () => { answer(reply(202, { ok: true })); });
     expect(answeredJustNow()).toEqual(["Delete for good", "Merge (recommended)", "Also rename Tim."]);
     expect(find("[data-widget]")).toBeNull();
+    expect(all('[role="status"]').map((status) => status.textContent)).toEqual([find('[data-ask-card="settled"] .tabular-nums')!.textContent]);
     act(() => button(t("question.details"))!.click());
     expect(controls().length).toBeGreaterThan(0);
     expect(controls().every((control) => control.disabled)).toBe(true);
@@ -471,6 +498,7 @@ describe("pressing", () => {
     expect(find('[data-ask-card="settled"]')!.textContent).toBe(`${widgetAnsweredAt(at)} · Delete for good · Merge (recommended) · Also rename Tim.${t("question.details")}`);
     expect(find("[data-widget]")).toBeNull();
     expect(button("Send")).toBeUndefined();
+    expect(find('[role="status"]')!.textContent).toBe("");
   });
 
   it("leaves a click on a row inside a row, or on a link in its Markdown, to that control", async () => {

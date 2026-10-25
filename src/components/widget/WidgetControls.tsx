@@ -102,7 +102,7 @@ export function WidgetButton({ actionRef, label, look, iconStart, iconEnd, block
     return (
       <span data-widget-answered={actionRef} className={cn(BUTTON, "cursor-default bg-ink/[0.04] text-ink-secondary", block && "flex w-full")}>
         <Check aria-hidden="true" size={14} className="shrink-0 text-success" />
-        <span className="min-w-0 truncate">{form.answered.text}</span>
+        <span dir="auto" className="min-w-0 truncate tabular-nums">{form.answered.text}</span>
       </span>
     );
   }

@@ -21,10 +21,11 @@ function fieldAnswer(field: WidgetField, settled: WidgetSettled): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-/** What the person sent, one part per filled field in the order the card draws them; the button's own label when no field went with it. */
-export function widgetAnswerSummary(fields: Iterable<WidgetField>, settled: WidgetSettled): string[] {
+/** What the person sent, one part per filled field in the order the card draws them, after the pressed button's label
+ * when it is `named` or no field went with it. */
+export function widgetAnswerSummary(fields: Iterable<WidgetField>, settled: WidgetSettled, named = false): string[] {
   const parts = [...fields].map((field) => fieldAnswer(field, settled)).filter(Boolean);
-  return parts.length ? parts : [settled.label];
+  return named || !parts.length ? [settled.label, ...parts] : parts;
 }
 
 export function widgetAnsweredAt(at: number, now = Date.now()): string {
@@ -32,5 +33,6 @@ export function widgetAnsweredAt(at: number, now = Date.now()): string {
   if (when.toDateString() === new Date(now).toDateString()) {
     return t("widget.answeredAt", { time: new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(when) });
   }
-  return t("widget.answeredOn", { date: new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(when) });
+  const year = when.getFullYear() === new Date(now).getFullYear() ? {} : { year: "numeric" as const };
+  return t("widget.answeredOn", { date: new Intl.DateTimeFormat(undefined, { ...year, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(when) });
 }

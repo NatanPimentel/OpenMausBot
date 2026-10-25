@@ -5676,6 +5676,8 @@
   "widget.required": "{label}は必須です。",
   "widget.sending": "送信中",
   "widget.sent": "送信しました",
+  "widget.answeredAt": "{time}に回答済み",
+  "widget.answeredOn": "{date}に回答済み",
   "widget.sendFailed": "送信できませんでした。もう一度お試しください。",
   "widget.choose": "選択",
   "widget.clear": "{label}をクリア",

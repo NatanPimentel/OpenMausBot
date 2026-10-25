@@ -180,6 +180,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
   const headed = Boolean(title || caption || meta || statusText);
   const name = title ?? statusText ?? t("widget.aria.card");
   const answeredAt = settled && settled.tone !== "cancel" ? widgetAnsweredAt(settled.at) : undefined;
+  const named = settled !== undefined && [...actions.values()].filter((entry) => !entry.client && (entry.tone === "submit" || entry.tone === "confirm")).length > 1;
   const form: WidgetForm = {
     uid,
     values,
@@ -199,7 +200,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       if (problem?.field === name) setProblem(undefined);
     },
     locked: isSettled || pending !== undefined,
-    answered: settled && answeredAt ? { ref: settled.ref, text: answeredAt } : undefined,
+    answered: settled && answeredAt ? { ref: settled.ref, text: named ? `${settled.label} · ${answeredAt}` : answeredAt } : undefined,
     invalid: problem?.field,
     errorId,
     fields,
@@ -252,38 +253,51 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
             </div>
           )}
         </div>
-        {!settled && (confirm || cancel) && (
+        {(confirm || cancel) && (!settled || form.answered?.ref === "confirm") && (
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             {confirm && <WidgetButton actionRef="confirm" label={confirm.label} look="primary" />}
-            {cancel && <WidgetButton actionRef="cancel" label={cancel.label} look="outline" />}
+            {cancel && !settled && <WidgetButton actionRef="cancel" label={cancel.label} look="outline" />}
           </div>
         )}
-        <span role="status" className="sr-only">{pending !== undefined ? t("widget.sending") : sent !== undefined ? t("widget.sent") : ""}</span>
       </div>
     </WidgetFormProvider>
   );
+  // Screen readers ignore a live region created with its text in it: this one outlives the swap from card to line.
+  const spoken = pending !== undefined ? t("widget.sending") : sent !== undefined ? t("widget.sent")
+    : answeredAt && settledHere && settled?.sendId === settledHere.sendId ? answeredAt : "";
+  const announcement = <span role="status" className="sr-only">{spoken}</span>;
 
-  if (!settled) return card;
+  if (!settled) {
+    return (
+      <>
+        {card}
+        {announcement}
+      </>
+    );
+  }
   const detailsId = `${uid}-details`;
-  const summary = answeredAt && widgetAnswerSummary(fields.values(), settled).join(" · ");
+  const summary = answeredAt && widgetAnswerSummary(fields.values(), settled, named).join(" · ");
   return (
-    <AskSettledLine
-      ariaLabel={name}
-      icon={settled.tone === "cancel" ? <X size={13} /> : undefined}
-      action={(
-        <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((open) => !open)} className={ASK_QUIET_BUTTON}>
-          {details ? t("question.hideDetails") : t("question.details")}
-        </button>
-      )}
-      detail={details && <div id={detailsId} className="mt-2">{card}</div>}
-    >
-      {!summary ? <span dir="auto">{settled.label}</span> : (
-        <span title={`${answeredAt} · ${summary}`}>
-          <span className="text-ink-secondary">{answeredAt}</span>
-          {" · "}
-          <bdi dir="auto">{summary}</bdi>
-        </span>
-      )}
-    </AskSettledLine>
+    <>
+      <AskSettledLine
+        ariaLabel={name}
+        icon={settled.tone === "cancel" ? <X size={13} /> : undefined}
+        action={(
+          <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((open) => !open)} className={cn(ASK_QUIET_BUTTON, "relative after:absolute after:inset-x-0 after:-inset-y-2 after:content-['']")}>
+            {details ? t("question.hideDetails") : t("question.details")}
+          </button>
+        )}
+        detail={details && <div id={detailsId} className="mt-2">{card}</div>}
+      >
+        {!summary ? <span dir="auto">{settled.label}</span> : (
+          <span title={`${answeredAt} · ${summary}`}>
+            <span className="tabular-nums">{answeredAt}</span>
+            {" · "}
+            <bdi dir="auto" className="text-ink-secondary">{summary}</bdi>
+          </span>
+        )}
+      </AskSettledLine>
+      {announcement}
+    </>
   );
 }

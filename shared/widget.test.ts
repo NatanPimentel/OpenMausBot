@@ -251,6 +251,14 @@ describe("widget actions", () => {
     ]);
     const loose = parsed({ type: "Card", children: [{ type: "Input", name: "q", label: "Question" }, { type: "Button", label: "Ask", onClickAction: { type: "q.ask" } }] });
     expect(widgetActions(loose)[0]!.tone).toBeUndefined();
+    const two = parsed({ type: "Card", children: [{ type: "Form", children: [
+      { type: "Textarea", name: "why", label: "Why" },
+      { type: "Row", children: [{ type: "Button", label: "Approve", onClickAction: { type: "approve" } }, { type: "Button", label: "Reject", onClickAction: { type: "reject" } }] },
+    ] }] });
+    expect(all(two).filter((node) => node.type === "Button").map(({ label, submit, style }) => ({ label, submit, style }))).toEqual([
+      { label: "Approve", submit: true, style: "secondary" },
+      { label: "Reject", submit: true, style: "secondary" },
+    ]);
   });
 
   it("records only words the person could read on the control they pressed", () => {

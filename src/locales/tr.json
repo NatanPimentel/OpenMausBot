@@ -4508,6 +4508,8 @@
   "widget.required": "{label} gereklidir.",
   "widget.sending": "Gönderiliyor",
   "widget.sent": "Gönderildi",
+  "widget.answeredAt": "Yanıtlandı: {time}",
+  "widget.answeredOn": "Yanıtlandı: {date}",
   "widget.sendFailed": "Gönderilemedi. Tekrar deneyin.",
   "widget.choose": "Seçin",
   "widget.clear": "{label} alanını temizle",

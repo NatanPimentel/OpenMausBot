@@ -4508,6 +4508,8 @@
   "widget.required": "{label} là bắt buộc.",
   "widget.sending": "Đang gửi",
   "widget.sent": "Đã gửi",
+  "widget.answeredAt": "Đã trả lời lúc {time}",
+  "widget.answeredOn": "Đã trả lời {date}",
   "widget.sendFailed": "Không thể gửi. Hãy thử lại.",
   "widget.choose": "Chọn",
   "widget.clear": "Xóa {label}",
