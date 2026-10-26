@@ -45,6 +45,8 @@ export interface ThreadMessage {
 const SIGNED_OUT = /\b(?:unauthori[sz]ed|unauthenticated|invalid[_ ]grant|expired|re-?connect|not connected|no connected account|not active|initiated|initializing|permission denied|forbidden|401|403)\b/i;
 
 /** A read that failed: the app, what went wrong, and whether reconnecting the app is what fixes it. */
+const READ_RETRY_PAUSE_MS = 2000;
+
 export class SourceError extends Error {
   readonly app: ReadApp;
   readonly signedOut: boolean;
@@ -356,8 +358,22 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
       return init.transportSessionId;
     }
 
-    /** One tool's data, or GONE when `gone` says the tool's own failure means the thing asked for is missing. */
+    // Local mod (Imobiturbo, 26/10/2026): a read that fails for a passing reason (Composio or Google hiccup, not a sign-out,
+    // not the time limit) is tried once more after a short pause, so one blip doesn't fail the whole routine run.
     async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean } = {}): Promise<unknown> {
+      const signal = options.signal ?? AbortSignal.timeout(readTimeoutMs);
+      try {
+        return await callOnce(slug, args, { ...options, signal });
+      } catch (error) {
+        if (!(error instanceof SourceError) || error.signedOut || signal.aborted) throw error;
+        await new Promise((resolve) => setTimeout(resolve, READ_RETRY_PAUSE_MS));
+        if (signal.aborted) throw error;
+        return callOnce(slug, args, { ...options, signal });
+      }
+    }
+
+    /** One tool's data, or GONE when `gone` says the tool's own failure means the thing asked for is missing. */
+    async function callOnce(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean } = {}): Promise<unknown> {
       const { gone, signal = AbortSignal.timeout(readTimeoutMs) } = options;
       const app = appOf(slug);
       try {

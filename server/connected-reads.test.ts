@@ -102,3 +102,22 @@ describe("a check's reads", () => {
     expect(calendar).toMatchObject({ app: "googlecalendar", signedOut: false });
   });
 });
+
+describe("local mod: one retry on a passing failure", () => {
+  it("tries a failed read once more and returns the second answer", async () => {
+    let calls = 0;
+    const { deps } = relay({
+      GMAIL_GET_PROFILE: () => (++calls === 1 ? { successful: false, error: "503 backend unavailable" } : { successful: true, data: fixture("composio-gmail-profile") }),
+    });
+    const address = await createConnectedReads(deps).session().address();
+    expect(address).toBe("admin@example.test");
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry a sign-out", async () => {
+    let calls = 0;
+    const { deps } = relay({ GMAIL_GET_PROFILE: () => { calls++; return { successful: false, error: "invalid_grant: token has been expired or revoked" }; } });
+    await expect(createConnectedReads(deps).session().address()).rejects.toBeInstanceOf(SourceError);
+    expect(calls).toBe(1);
+  });
+});
