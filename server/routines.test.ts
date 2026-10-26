@@ -796,6 +796,79 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(new RoutineManager(h.options).listRuns()[0]?.status).toBe("failed");
   });
 
+  const storedRun = (h: ReturnType<typeof harness>) => JSON.parse(readFileSync(h.options.file!, "utf8")).runs[0];
+
+  it("keeps a run as stored when the write of a runtime event fails, and counts its cost once the write goes through", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    h.manager.runNow(routine.id); await h.manager.tick();
+    const thread = { eventId: "event", provider: "fake", threadId: "thread-1", createdAt: new Date(start).toISOString() };
+    const save = failSave(h);
+    expect(() => h.manager.handleRuntimeEvent({ ...thread, type: "request.opened", requestType: "permission", tool: "run", summary: "ls" })).toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", asked: undefined, waitingSince: undefined });
+    save.mockImplementationOnce(() => { throw new Error("fixture disk full"); });
+    expect(() => h.manager.handleRuntimeEvent({ ...thread, type: "turn.completed", ok: true, cost: 0.02, denials: ["GMAIL_SEND_EMAIL"] })).toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", cost: undefined, denials: undefined, finishedAt: undefined });
+    h.manager.handleRuntimeEvent({ ...thread, type: "turn.completed", ok: true, cost: 0.02 });
+    expect(storedRun(h)).toMatchObject({ status: "completed", cost: 0.02 });
+  });
+
+  it("keeps a run waiting on its approval and logs why when the write that stops it for want of an answer fails", async () => {
+    const h = harness(start);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const routine = h.manager.create(input());
+    h.manager.runNow(routine.id); await h.manager.tick();
+    const thread = { eventId: "event", provider: "fake", threadId: "thread-1", createdAt: new Date(start).toISOString() };
+    h.manager.handleRuntimeEvent({ ...thread, type: "request.opened", requestType: "permission", tool: "run", summary: "ls" });
+    failSave(h);
+    expect(h.manager.handleRuntimeEvent({ ...thread, type: "request.resolved", behavior: "deny", source: "timeout" })).toMatchObject({ status: "waiting" });
+    await vi.waitFor(() => expect(logged).toHaveBeenCalledWith("routines: could not stop a run nobody answered", expect.objectContaining({ message: "fixture disk full" })));
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting", asked: { approval: true }, error: undefined });
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
+  it("keeps a run running and its owner notice unspent when the write that requeues or fails it fails", async () => {
+    const h = harness(start);
+    const alerts: unknown[] = [];
+    h.options.onRunFailed = (_run, alert) => alerts.push(alert);
+    const routine = h.manager.create(input());
+    h.manager.runNow(routine.id); await h.manager.tick();
+    failSave(h);
+    expect(() => h.manager.failThread("thread-1", "The AI stalled", { stalled: true })).toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", retried: undefined, retryAt: undefined, attention: undefined });
+    failSave(h);
+    expect(() => h.manager.failThread("thread-1", "Usage limit reached", { stopReason: "quota" })).toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", error: undefined });
+    h.manager.failThread("thread-1", "Usage limit reached", { stopReason: "quota" });
+    expect(alerts).toEqual([{ detail: expect.any(String) }]);
+    expect(storedRun(h)).toMatchObject({ status: "failed" });
+  });
+
+  it.each(["blocked", "needs-input", "completed"] satisfies GroupGoalRunStatus[])("keeps a room goal running with no goal status when the write of its %s outcome fails", async (status) => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), target: "room-goal", botId: "chief-1", groupId: "room-1" });
+    const run = h.manager.runNow(routine.id)!; await h.manager.tick();
+    failSave(h);
+    expect(() => h.manager.finishGoalRun(run.id, status, "Goal detail")).toThrow("fixture disk full");
+    const kept = h.manager.listRuns()[0]!;
+    expect([kept.status, kept.goalStatus, kept.attention, kept.finishedAt]).toEqual(["running", undefined, undefined, undefined]);
+    expect(h.manager.finishGoalRun(run.id, status, "Goal detail")).toMatchObject({ goalStatus: status });
+    expect(storedRun(h)).toMatchObject({ goalStatus: status });
+  });
+
+  it("keeps a timed-out room goal running with no goal status when the write that stops it fails", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), target: "room-goal", botId: "chief-1", groupId: "room-1", timeoutMinutes: 5 });
+    h.manager.runNow(routine.id); await h.manager.tick();
+    h.setNow(h.manager.listRuns()[0]!.startedAt! + 5 * 60_000);
+    failSave(h);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", goalStatus: undefined });
+    expect(h.interruptedGoals).toEqual([]);
+    await h.manager.tick();
+    expect(storedRun(h)).toMatchObject({ status: "failed", goalStatus: "limit-reached" });
+  });
+
   it("leaves promptly dispatched runs unstamped and quiet", async () => {
     const h = harness(start); h.setBot("busy");
     const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
