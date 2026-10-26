@@ -66,8 +66,11 @@ export function needsInputQuestion(text: string): string | undefined {
   const line = lines[last]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
   const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
+  // Local patch: "NEEDS INPUT: nenhum." is a bot saying it needs nothing, not a question.
+  if (NEEDS_INPUT_NONE.test(question) && !question.includes("?")) return undefined;
   return question || undefined;
 }
+const NEEDS_INPUT_NONE = /^(?:nenhum|nenhuma|nada|none|nothing|n\/a|-+|\u2014|\u2013)(?=[\s.,;:!]|$)/i;
 
 export function view(a: Assignment, parent?: Assignment): HandoffView {
   const groupId = a.assignee.destination.groupId;
