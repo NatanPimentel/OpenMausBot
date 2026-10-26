@@ -740,6 +740,62 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.listRuns()[0]?.status).toBe("running");
   });
 
+  /** Fails the write after `writes` successful ones; the spy then writes until told to fail again. */
+  const failSave = (h: ReturnType<typeof harness>, writes = 0) => {
+    const manager = h.manager as unknown as { save(): void };
+    const write = manager.save.bind(h.manager);
+    const save = vi.spyOn(manager, "save");
+    for (let index = 0; index < writes; index++) save.mockImplementationOnce(write);
+    return save.mockImplementationOnce(() => { throw new Error("fixture disk full"); });
+  };
+
+  it("keeps a deferral unstamped and unannounced when its write fails, and stamps and announces it once it can write", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    const save = failSave(h, 1);
+    h.setNow(routine.nextRunAt!);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", deferredAt: undefined });
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]?.deferredAt).toBe(routine.nextRunAt);
+
+    save.mockImplementationOnce(() => { throw new Error("fixture disk full"); });
+    h.setNow(routine.nextRunAt! + 30 * 60_000);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]?.deferredNoticeAt).toBeUndefined();
+    expect(h.deferred).toHaveLength(0);
+    await h.manager.tick();
+    expect(h.deferred).toHaveLength(1);
+    expect(new RoutineManager(h.options).listRuns()[0]?.deferredNoticeAt).toBe(routine.nextRunAt! + 30 * 60_000);
+  });
+
+  it("keeps a queued interval run on its occurrence when the write that moves it fails", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create({ ...input(), schedule: { type: "interval", everyMinutes: 5, anchorAt: start } });
+    const first = routine.nextRunAt!;
+    h.setNow(first); await h.manager.tick();
+    failSave(h, 1);
+    h.setNow(first + 5 * 60_000);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]?.scheduledFor).toBe(first);
+    await h.manager.tick();
+    expect(new RoutineManager(h.options).listRuns()[0]?.scheduledFor).toBe(first + 5 * 60_000);
+  });
+
+  it("keeps a run queued and unreported when the write that fails it fails, and fails it once it can write", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setBot("missing");
+    failSave(h);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", error: undefined, finishedAt: undefined });
+    expect(h.failed).toEqual([]);
+    await h.manager.tick();
+    expect(h.failed).toHaveLength(1);
+    expect(new RoutineManager(h.options).listRuns()[0]?.status).toBe("failed");
+  });
+
   it("leaves promptly dispatched runs unstamped and quiet", async () => {
     const h = harness(start); h.setBot("busy");
     const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));

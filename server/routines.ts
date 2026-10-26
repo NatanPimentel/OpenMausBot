@@ -1104,8 +1104,7 @@ export class RoutineManager {
         if (definition?.schedule.type === "interval") {
           const latest = latestIntervalOccurrence(definition.schedule, now);
           if (latest !== null && latest > run.scheduledFor) {
-            run.scheduledFor = latest;
-            this.save();
+            this.saveRun(run, { scheduledFor: latest });
             this.emitRun(run);
           }
           const requiresCurrentDayOccurrence =
@@ -1129,13 +1128,11 @@ export class RoutineManager {
         const state = sameRoutineWorking ? "busy" : this.targetState(run);
         if (state === "busy") {
           if (run.deferredAt == null) {
-            run.deferredAt = now;
-            this.save();
+            this.saveRun(run, { deferredAt: now });
             this.emitRun(run);
           }
-          if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
-            run.deferredNoticeAt = now;
-            this.save();
+          if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt! >= ROUTINE_DEFERRAL_NOTICE_MS) {
+            this.saveRun(run, { deferredNoticeAt: now });
             this.emitRun(run);
             this.options.onRunDeferred?.(cloneRun(run));
           }
@@ -1392,14 +1389,17 @@ export class RoutineManager {
   }
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
-    run.status = status;
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
-    this.save();
+    this.saveRun(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() });
     this.emitRun(run);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
     this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
+  }
+
+  /** On a failed write, the live run object (tick() may hold it) gets its fields back. */
+  private saveRun(run: RoutineRun, change: Partial<RoutineRun>) {
+    const runs = this.runs.slice(), before = Object.fromEntries(Object.keys(change).map((key) => [key, run[key as keyof RoutineRun]]));
+    Object.assign(run, change);
+    try { this.save(); } catch (error) { this.runs = runs; Object.assign(run, before); throw error; }
   }
 
   private advancePastOccurrence(routine: Routine, now: number, occurrence: number) {
