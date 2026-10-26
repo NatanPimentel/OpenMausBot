@@ -281,8 +281,9 @@ export class BrowserService {
 
   /** Graceful: Chrome's own quit, so its next start reopens the tabs and keeps session cookies. */
   async #stop(profile: ProfileState, reopened: Reopened, { erase = false }: { erase?: boolean } = {}): Promise<void> {
-    if (profile.stopping) return profile.stopping;
+    if (profile.stopping && !erase) return profile.stopping;
     profile.epoch++;
+    if (profile.stopping) return profile.stopping.then(() => this.#erase(profile));
     const run = profile.run;
     const opening = profile.opening;
     const stopping = (async () => {

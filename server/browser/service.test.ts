@@ -499,4 +499,20 @@ describe("browsers on one computer", () => {
     expect(service.profiles()).toHaveLength(0);
     expect(dataDir).toBeTruthy();
   });
+
+  it("erases the profile's files when the erase joins a close already in progress, and starts nothing queued behind it", async () => {
+    const { service, call, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const profile = service.profiles()[0]!;
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(profile.downloadDir)).toBe(true);
+    const closing = service.close(target.session);
+    const reopening = service.running(profile);
+    await service.erase("bot:a");
+    await closing;
+    await expect(reopening).rejects.toThrow("closed while it was starting");
+    expect(existsSync(profile.downloadDir)).toBe(false);
+    expect(service.profiles()).toHaveLength(0);
+    expect(backend.chromes).toHaveLength(1);
+  });
 });
