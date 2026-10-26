@@ -467,6 +467,36 @@ describe("browsers on one computer", () => {
     expect(backend.chromes.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("opens nothing and recreates no folder for a start whose profile is erased right after it begins", async () => {
+    const { service, target, backend } = setup();
+    const profile = service.profile(target);
+    const starting = service.running(profile);
+    await service.erase("bot:a");
+    await expect(starting).rejects.toThrow("closed while it was starting");
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(profile.downloadDir)).toBe(false);
+    expect(backend.chromes).toHaveLength(0);
+  });
+
+  it("evicts no other browser for a start that waits for room after its profile was erased, and frees its slot once closed", async () => {
+    for (const stop of ["erase", "close"] as const) {
+      const { service, call, backend } = setup({ maxRunning: 1, capacityWaitMs: 5_000 });
+      const other = { session: "bot-b", key: "bot:b" };
+      await call("agent_browser_open", { url: "https://example.com/b" }, other);
+      const viewer = await service.attachViewer(other, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, () => {});
+      const pending = call("agent_browser_status");
+      await sleep(50);
+      await (stop === "erase" ? service.erase("bot:a") : service.close("bot-a"));
+      await sleep(700);
+      expect(service.runs("bot-a")).toBe(false);
+      await viewer.close();
+      await sleep(700);
+      expect((await pending).isError).toBe(true);
+      expect(service.profiles().find((profile) => profile.key === "bot:b")?.run).not.toBeNull();
+      expect(backend.chromes).toHaveLength(1);
+    }
+  });
+
   it("closes a browser that was still starting when its profile was erased or every browser closed, before either finishes", async () => {
     for (const stop of ["erase", "closeAll"] as const) {
       let real: FakeBackend | null = null;

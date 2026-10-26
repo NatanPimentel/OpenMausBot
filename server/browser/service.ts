@@ -186,7 +186,7 @@ export class BrowserService {
   }
 
   async #start(profile: ProfileState, epoch: number): Promise<Running> {
-    await this.#capacity(profile);
+    await this.#capacity(profile, epoch);
     this.#stillWanted(profile, epoch);
     const opening = this.#open(profile, epoch);
     profile.opening = opening;
@@ -327,9 +327,10 @@ export class BrowserService {
   }
 
   /** The least recently used unwatched idle browser makes room; with none, the call waits, then is told why it cannot start. */
-  async #capacity(profile: ProfileState): Promise<void> {
+  async #capacity(profile: ProfileState, epoch: number): Promise<void> {
     const until = Date.now() + this.#options.capacityWaitMs;
     for (;;) {
+      this.#stillWanted(profile, epoch);
       const others = this.profiles().filter((other) => other !== profile && (other.run || other.starting));
       if (others.length < this.#options.maxRunning) return;
       const candidate = others.filter((other) => other.hub.size === 0 && this.#unused(other, 0)).sort((a, b) => a.lastUsed - b.lastUsed)[0];
