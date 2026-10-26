@@ -2,7 +2,7 @@
 // needs no judgement goes to the brief straight away; what needs judgement goes to one run, and the cursors move only
 // once that run's answer is kept. State is ids and times only, one entry per routine, in routine-checks.json.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -182,7 +182,15 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     const signedOut = error instanceof SourceError && error.signedOut;
     const previous = entry.failures?.[app];
     entry.failures = { ...entry.failures, [app]: { since: previous?.since ?? now(), count: (previous?.count ?? 0) + 1, lastAt: now(), ...(signedOut ? { signedOut } : {}) } };
-    console.warn(`checks: could not read ${appName[app]}: ${error instanceof Error ? error.message : String(error)}`);
+    const why = error instanceof Error ? error.message : String(error);
+    console.warn(`checks: could not read ${appName[app]}: ${why}`);
+    // Local mod (Imobiturbo, 26/10/2026): keep the reason on disk, the app's console isn't kept anywhere.
+    try {
+      const log = join(deps.dataDir, "routine-checks-errors.log");
+      let size = 0;
+      try { size = statSync(log).size; } catch {}
+      if (size < 1_000_000) appendFileSync(log, `${new Date(now()).toISOString()} ${appName[app]}: ${why.replace(/\s+/g, " ").slice(0, 500)}\n`, { mode: 0o600 });
+    } catch {}
     return { app, signedOut };
   }
   const readsBackOff = (entry: RoutineState, app: ReadApp): boolean => {
