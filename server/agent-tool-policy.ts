@@ -15,6 +15,7 @@ export const READ_ONLY_AGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "skills_list",
   "list_tables",
   "query_data",
+  "list_unread_notifications",
 ]);
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
