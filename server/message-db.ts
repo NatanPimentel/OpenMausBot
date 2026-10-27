@@ -545,6 +545,21 @@ export interface AttentionRow {
 }
 
 
+// Local mod (Imobiturbo, 27/10/2026): a show_widget card that asks something and was never sent back. A widget with a
+// form, a confirm or a button counts; one already sent carries `widget.settled`.
+export function openWidgetRows(since: number): Array<{ threadId: string; id: string; at: number; title: string | null }> {
+  return db().prepare(
+    "SELECT w.thread_id AS threadId, w.id, w.at, json_extract(w.json, '$.widget.root.title') AS title FROM messages w " +
+    "WHERE w.kind = 'widget' AND w.at >= ? AND json_extract(w.json, '$.widget.settled') IS NULL " +
+    "AND json_extract(w.json, '$.serverCard') IS NULL AND (json_extract(w.json, '$.widget.root.confirm') IS NOT NULL " +
+    "OR w.json LIKE '%\"onSubmitAction\"%' OR w.json LIKE '%\"onClickAction\"%') " +
+    // The person wrote in that conversation afterwards: the card is behind them.
+    "AND NOT EXISTS (SELECT 1 FROM messages u WHERE u.thread_id = w.thread_id AND u.at > w.at AND u.kind = 'text' " +
+    "AND json_extract(u.json, '$.role') = 'user' AND json_extract(u.json, '$.from') IS NULL AND json_extract(u.json, '$.roomRequest') IS NULL) " +
+    "ORDER BY w.at",
+  ).all(since) as unknown as Array<{ threadId: string; id: string; at: number; title: string | null }>;
+}
+
 export function attentionRows(since: number): AttentionRow[] {
   const columns = "SELECT thread_id AS threadId, id, at, kind, json_extract(json, '$.from.botId') AS fromBotId, json_extract(json, '$.digest.botId') AS digestBotId, " +
     "json_extract(json, '$.tool.name') AS name, json_extract(json, '$.tool.setup') AS setup, json_extract(json, '$.tool.place') AS place, " +

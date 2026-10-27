@@ -249,6 +249,19 @@ describe("needs you", () => {
     expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
   });
 
+  it("local mod: lists a widget card that asks something until it is sent back", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const root = { type: "Card", id: "n1", title: "Pick a date", confirm: { label: "Send", action: { type: "pick" } }, children: [] };
+    const asked = w.say(mia.threadId, { role: "bot", kind: "widget", at: at(12, 3), text: "", widget: { v: 1, root } } as never);
+    w.say(mia.threadId, { role: "bot", kind: "widget", at: at(12, 4), text: "", widget: { v: 1, root: { type: "Card", id: "n1", title: "Just news", children: [] } } } as never);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: asked.id, at: at(12, 3), botId: mia.id, threadId: mia.threadId, text: "Pick a date" },
+    ]);
+    w.store.patchMessage(mia.threadId, asked.id, { widget: { v: 1, root, settled: { at: at(13) } } } as never);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
+  });
+
   it("drops a question the person closed, and lists a request asked again only where it was asked last", () => {
     const w = world();
     const mia = w.store.createBot({ name: "Mia" });

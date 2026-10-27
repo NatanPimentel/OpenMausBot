@@ -12,7 +12,8 @@ import { NEEDS_YOU_WINDOW_MS, TODAY_MAX_LINES, TODAY_MAX_WINDOW_MS, type NeedsYo
 import { trialCreditKind } from "../shared/trial-credit.ts";
 import { toolkitName } from "./activity.ts";
 import { classifyError } from "./drivers/retry.ts";
-import { attentionRows, requestSenders, successfulCallsMentioning, workRows, type AttentionRow, type WorkRow } from "./message-db.ts";
+import { DatabaseSync } from "node:sqlite";
+import { attentionRows, openWidgetRows, requestSenders, successfulCallsMentioning, workRows, type AttentionRow, type WorkRow } from "./message-db.ts";
 
 export interface TodayViewer {
   /** Engines, plans and connected apps are an admin's to fix; anyone else sees only their bots' questions. */
@@ -328,5 +329,37 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
     keep(`question:${work.threadId}`, { kind: "question", id: work.id, at: work.createdAt, botId: work.botId, threadId: work.threadId, text: plainTitle(work.question) });
   }
 
+  // Local mod (Imobiturbo, 27/10/2026): the person's open cards and decisions count too: the newest show_widget still
+  // waiting in each conversation, and the open `decisao` lines of the shared caixa_natan, which the MausBot delivers.
+  for (const row of openWidgetRows(now - NEEDS_YOU_WINDOW_MS)) {
+    const botId = owners.get(row.threadId)?.botId;
+    if (!botId || !seen(row.threadId) || (viewer.asks && !viewer.asks(botId, row.threadId))) continue;
+    keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: plainTitle(row.title || "A card is waiting for you") });
+  }
+  const home = (sources.bots as ReadonlyArray<{ id: string; threadId: string; defaultBot?: boolean; hidden?: boolean }>).find((bot) => bot.defaultBot && !bot.hidden);
+  if (home && seen(home.threadId) && !items.has(`question:${home.threadId}`)) {
+    const open = openDecisions();
+    if (open.length) {
+      const text = `${open.length} ${open.length === 1 ? "decision" : "decisions"} waiting: ${open.slice(0, 3).map((one) => one.assunto).join("; ")}`;
+      keep(`question:${home.threadId}`, { kind: "question", id: `caixa:${open[0]!.chave}`, at: open[0]!.at, botId: home.id, threadId: home.threadId, text: plainTitle(text) });
+    }
+  }
+
   return [...items.values()].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.at - a.at);
+}
+
+/** Open `decisao` lines of the shared caixa_natan (OMB_OPENBOT_DATA_PATH), newest first; none when it can't be read. */
+function openDecisions(): Array<{ chave: string; assunto: string; at: number }> {
+  const file = process.env["OMB_OPENBOT_DATA_PATH"];
+  if (!file) return [];
+  let data: DatabaseSync | undefined;
+  try {
+    data = new DatabaseSync(file, { readOnly: true });
+    const rows = data.prepare("SELECT chave, assunto, criado_em FROM caixa_natan WHERE tipo = 'decisao' AND estado IN ('novo', 'entregue') ORDER BY criado_em DESC LIMIT 20").all() as Array<{ chave: string; assunto: string; criado_em: string }>;
+    return rows.map((row) => ({ chave: String(row.chave), assunto: String(row.assunto ?? ""), at: Date.parse(String(row.criado_em)) || 0 }));
+  } catch {
+    return [];
+  } finally {
+    try { data?.close(); } catch {}
+  }
 }
