@@ -52,15 +52,14 @@ describe("failures on the Automations page", () => {
     schedule: { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, nextRunAt: Date.now() + 3_600_000, createdAt: 0, updatedAt: 0,
   });
 
-  it("shows a schedule that failed twice running as Needs you, first, with Run now to fix it", () => {
+  // Local mod (Imobiturbo, 25/10/2026): repeated failures are the fleet's to fix, so no Needs you pill; the schedule still lists.
+  it("lists a schedule that failed twice as Working, with no Needs you pill", () => {
     fixture.state = { ...initialState, bots: [bot], routines: [routine("fine", "Fine brief"), routine("broken", "Broken report")], routineRuns: [
       { ...failed, id: "f1", scheduledFor: 200, createdAt: 200 }, { ...failed, id: "f2", scheduledFor: 100, createdAt: 100 }, completed,
     ] };
     const markup = markupOf();
     expect(markup.indexOf("writes the broken report")).toBeGreaterThan(-1);
-    expect(markup.indexOf("writes the broken report")).toBeLessThan(markup.indexOf("writes the fine brief"));
-    expect(markup).toContain("Needs you: It didn&#x27;t finish the last 2 times.");
-    expect(markup).toContain("Run now</button>");
+    expect(markup).not.toContain("Needs you");
   });
 
   it("keeps a schedule Working after one failure it recovered from, with no problem pill or run logs", () => {
@@ -72,9 +71,11 @@ describe("failures on the Automations page", () => {
     expect(markup).not.toMatch(/Open problem run logs|Mark all as read|Run logs/);
   });
 
-  it("lands a 'problems' link from a chat or notice on the list, needs-you first, instead of a separate log", () => {
+  it("lands a 'problems' link from a chat or notice on the list instead of a separate log", () => {
     fixture.state = { ...initialState, bots: [bot], routines: [routine("broken", "Broken report")], routineRuns: [failed, { ...failed, id: "f0", scheduledFor: 50, createdAt: 50 }],
       routinesFocus: { section: "logs", runStatus: "problems", nonce: 1 } };
-    expect(markupOf()).toContain("Needs you: It didn&#x27;t finish the last 2 times.");
+    const markup = markupOf();
+    expect(markup).toContain("writes the broken report");
+    expect(markup).not.toContain("Needs you");
   });
 });

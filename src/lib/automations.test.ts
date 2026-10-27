@@ -109,18 +109,19 @@ describe("status: Working, Paused, Needs you", () => {
     expect(orderAutomations([once(at(-1, 9)), automation([], { id: "p", enabled: false })]).map((item) => item.id)).toEqual(["p", `once-${at(-1, 9)}`]);
   });
 
-  it("needs you when signed out, out of credit, out of time, waiting on an answer, or failing again and again", () => {
+  // Local mod (Imobiturbo, 25/10/2026): only sign-in and usage ask for the person; a time limit, a wait and repeated failures are the fleet's to fix.
+  it("needs you when signed out or out of credit, but not for a time limit, a wait or failing again and again", () => {
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Claude is signed out. Run claude auth login." })]))).toMatchObject({ state: "needs-you", fix: "sign-in", reason: "It's signed out. Sign in again so it can run." });
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Out of credit: quota exceeded" })]))).toMatchObject({ state: "needs-you", fix: "usage" });
-    expect(automationStatus(automation([run("failed", at(0, 9), { error: "Stopped after reaching the 15-minute run limit" })]))).toMatchObject({ state: "needs-you", fix: "edit" });
-    expect(automationStatus(automation([run("waiting", at(0, 9), { attention: "Approve the reply?" })]))).toMatchObject({ state: "needs-you", fix: "answer" });
+    expect(automationStatus(automation([run("failed", at(0, 9), { error: "Stopped after reaching the 15-minute run limit" })]))).toMatchObject({ state: "working" });
+    expect(automationStatus(automation([run("waiting", at(0, 9), { attention: "Approve the reply?" })]))).toMatchObject({ state: "working" });
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Provider crashed" }), run("missed", at(-1, 9)), run("completed", at(-2, 9))])))
-      .toMatchObject({ state: "needs-you", fix: "run", reason: "It didn't finish the last 2 times." });
+      .toMatchObject({ state: "working" });
   });
 
   it("ignores runs still waiting to start and runs a person stopped when judging the last run", () => {
     expect(automationStatus(automation([run("queued", at(0, 11)), run("cancelled", at(0, 10)), run("completed", at(0, 9))])).state).toBe("working");
-    expect(automationStatus(automation([run("queued", at(0, 11)), run("cancelled", at(0, 10)), run("failed", at(0, 9)), run("failed", at(-1, 9))])).state).toBe("needs-you");
+    expect(automationStatus(automation([run("queued", at(0, 11)), run("cancelled", at(0, 10)), run("failed", at(0, 9)), run("failed", at(-1, 9))])).state).toBe("working");
   });
 });
 

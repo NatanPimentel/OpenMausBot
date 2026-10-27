@@ -1,0 +1,33 @@
+{
+  "catalog-compat": {
+    "exit": 0,
+    "note": "59 ferramentas do upstream intactas; adicionadas so delete_table, execute_data, list_tables, query_data, routine_no_update"
+  },
+  "server-typecheck-build": {
+    "exit": 0,
+    "seconds": 58,
+    "onde": "vps3"
+  },
+  "server-bundle": {
+    "exit": 0,
+    "seconds": 5,
+    "onde": "vps3"
+  },
+  "packaged-server-smoke": {
+    "exit": 0,
+    "seconds": 37,
+    "onde": "vps3"
+  },
+  "ui-build": {
+    "exit": 0,
+    "seconds": 104,
+    "onde": "vps3"
+  },
+  "full-vitest-vps3": {
+    "exit": 0,
+    "onde": "vps3, 4 shards (fileParallelism=false no upstream)",
+    "files": "~1800",
+    "tests": "22.936 (67 falhas na 1a rodada, todas sem relacao com o mod, exceto 3 testes de Needs you + 1 ratchet, corrigidos)",
+    "nota": "Falhas restantes (cloud-*, engine-install, harness/registry, workspace-backup, checkpoints, sentinel, self-check/box.linux, team-move, use-my-mac, opencode-provider-keys, comment-history) tambem falham identicas no v0.1.129 puro rodado na mesma vps3 (ambiente: root, sem node no PATH do npm, sem historico git, sem rede de nuvem)."
+  }
+}
