@@ -13493,6 +13493,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      if (path === OPENBOT_DATA_INTERNAL_PATH) {
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        try {
+          return json(res, 200, await openBotDataHost.handle(await readInternalBody(), {
+            botId: internalSender.id, assertActive: requireActiveInternalCapability,
+            allowSharedData: !cloudGuestDriven(internalCapability.threadId) && !cloudGuestDrivenHandoff(internalCapability.roomHandoffId),
+          }));
+        } catch (error) {
+          if (error instanceof OpenBotDataError) return json(res, openBotDataErrorStatus(error), { error: error.message, code: error.code });
+          throw error;
+        }
+      }
+      if (path === "/api/internal/routine-no-update") {
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        const body = await readInternalBody();
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+          return json(res, 400, { error: "No arguments are accepted." });
+        }
+        const run = activeRoutineRunForThread(internalCapability.threadId);
+        if (!run || run.botId !== internalSender.id) return json(res, 403, { error: "This is not an active routine run owned by this bot." });
+        requireActiveInternalCapability();
+        if (!routines?.markNoUpdate(run.id)) return json(res, 409, { error: "This routine run is not running." });
+        return json(res, 200, { ok: true });
+      }
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS || await helperToolRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody, folders: botFolders }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS) return; const pagesCall = new AbortController(); res.once("close", () => { if (!res.writableEnded) pagesCall.abort(); }); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: pagesCall.signal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);

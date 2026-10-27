@@ -618,12 +618,17 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toBe("openmausbot-agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_tables",
+      "query_data",
+      "execute_data",
+      "delete_table",
       "tool_result_read",
       "list_shared_computers",
       "shared_computer",
       "list_room_targets",
       "coordinate_bots",
       "assignment_status",
+      "routine_no_update",
       "list_bots",
       "list_rooms",
       "select_computer",
@@ -741,6 +746,7 @@ describe("agents-proxy MCP surface", () => {
   it("advertises read annotations only for the reviewed built-in reads", async () => {
     const list = await rpc("tools/list");
     const readNames = [
+      "list_tables", "query_data",
       "tool_result_read",
       "list_shared_computers",
       "assignment_status", "list_bots", "list_rooms", "list_threads",
@@ -2330,7 +2336,7 @@ describe("tool bridge", () => {
   /** The main child's switches: a Chief with skills and shared computers. */
   const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "routine_no_update", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;

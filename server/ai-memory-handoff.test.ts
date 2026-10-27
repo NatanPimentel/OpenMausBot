@@ -122,7 +122,7 @@ it("carries a conversation whose only attachment is stored beside the text", () 
 it("names why no checkpoint is made", () => {
   const folded = [{ id: "old", role: "user" as const, text: "Remember the decision" }];
   expect(accountHandoffCheckpoint(folded, [{ card: {
-    title: "Which port?", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
+    title: "Which port?", subtitle: "", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
   } }])).toEqual({ skip: "answered-question" });
   expect(accountHandoffCheckpoint([{ id: "too-long", role: "user", text: "u".repeat(6_001) }], [])).toEqual({ skip: "no-room" });
 });
@@ -130,6 +130,6 @@ it("names why no checkpoint is made", () => {
 it("declines folding resolved question-card answers", () => {
   const folded = [{ id: "old", role: "user" as const, text: "Remember the decision" }];
   expect(accountHandoffSummary(folded, [{ card: {
-    title: "Which port?", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
+    title: "Which port?", subtitle: "", options: [], requestType: "question", answered: "answer", answeredText: "Use port 9001",
   } }])).toBeNull();
 });

@@ -80,7 +80,7 @@ it("a run with nothing new leaves no unread mark, a run with news still does, an
     expect((await notifications()).filter((entry) => entry.threadId === quietHook.threadId)).toEqual([]);
 
     somethingNew();
-    const loudHook = await deliver();
+    await deliver();
     expect((await task(main)).unread).toBe(true);
     expect((await notifications()).filter((entry) => entry.threadId === main && !entry.read)).toHaveLength(2);
 
