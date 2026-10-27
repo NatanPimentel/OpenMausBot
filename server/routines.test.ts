@@ -740,12 +740,11 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.listRuns()[0]?.status).toBe("running");
   });
 
-  /** Fails the write after `writes` successful ones; the spy then writes until told to fail again. */
-  const failSave = (h: ReturnType<typeof harness>, writes = 0) => {
+  const failSave = (h: ReturnType<typeof harness>, writesBeforeFailure = 0) => {
     const manager = h.manager as unknown as { save(): void };
     const write = manager.save.bind(h.manager);
     const save = vi.spyOn(manager, "save");
-    for (let index = 0; index < writes; index++) save.mockImplementationOnce(write);
+    for (let index = 0; index < writesBeforeFailure; index++) save.mockImplementationOnce(write);
     return save.mockImplementationOnce(() => { throw new Error("fixture disk full"); });
   };
 

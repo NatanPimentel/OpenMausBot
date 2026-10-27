@@ -1390,7 +1390,6 @@ export class RoutineManager {
     this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
   }
 
-  /** On a failed write, the run list save() trims comes back, and `undo` gives the live run object (tick() may hold it) and the owner notices back their state from before the change. */
   private saveRun(run: RoutineRun, change: Partial<RoutineRun>, undo = this.undoFor(run)) {
     const runs = this.runs.slice();
     Object.assign(run, change);
