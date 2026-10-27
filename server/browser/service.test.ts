@@ -562,4 +562,17 @@ describe("browsers on one computer", () => {
       expect(backend.chromes).toHaveLength(1);
     }
   });
+
+  it("keeps the files of a browser started after an erase that other erases joined", async () => {
+    const { service, call, target } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const closing = service.close(target.session);
+    const erases = [service.erase("bot:a"), service.erase("bot:a"), service.erase("bot:a")];
+    await erases[0];
+    const replacement = service.profile(target);
+    await service.running(replacement);
+    await Promise.all([closing, ...erases]);
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(replacement.downloadDir)).toBe(true);
+  });
 });

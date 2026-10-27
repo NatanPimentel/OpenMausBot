@@ -316,8 +316,9 @@ export class BrowserService {
   }
 
   #erase(profile: ProfileState): void {
+    if (this.#profiles.get(profile.key) !== profile) return;
     this.#eraseFiles(profile.key);
-    if (this.#profiles.get(profile.key) === profile) this.#profiles.delete(profile.key);
+    this.#profiles.delete(profile.key);
   }
 
   #eraseFiles(key: string): void {
