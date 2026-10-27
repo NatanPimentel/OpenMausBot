@@ -283,10 +283,10 @@ export class BrowserService {
   async #stop(profile: ProfileState, reopened: Reopened, { erase = false }: { erase?: boolean } = {}): Promise<void> {
     if (profile.stopping && !erase) return profile.stopping;
     profile.epoch++;
-    if (profile.stopping) return profile.stopping.then(() => this.#erase(profile));
+    if (profile.stopping) return this.#barrier(profile, profile.stopping.then(() => this.#erase(profile)));
     const run = profile.run;
     const opening = profile.opening;
-    const stopping = (async () => {
+    return this.#barrier(profile, (async () => {
       profile.control.closing = true;
       profile.control.changed();
       try {
@@ -301,17 +301,23 @@ export class BrowserService {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
-        if (profile.temporary || erase) this.#erase(profile);
+        if (erase) this.#erase(profile);
+        else if (profile.temporary) this.#eraseFiles(profile.key);
         profile.control.closing = false;
         profile.control.settle();
       }
-    })().finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
+    })());
+  }
+
+  #barrier(profile: ProfileState, work: Promise<void>): Promise<void> {
+    const stopping = work.finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
     profile.stopping = stopping;
     return stopping;
   }
 
   #erase(profile: ProfileState): void {
     this.#eraseFiles(profile.key);
+    if (this.#profiles.get(profile.key) === profile) this.#profiles.delete(profile.key);
   }
 
   #eraseFiles(key: string): void {
@@ -379,7 +385,6 @@ export class BrowserService {
     const profile = this.#profiles.get(key);
     if (profile) {
       await this.#stop(profile, null, { erase: true });
-      this.#profiles.delete(key);
       this.#holds.drop(profile.session);
     } else {
       this.#eraseFiles(key);
