@@ -103,6 +103,19 @@ describe("a check's reads", () => {
   });
 });
 
+describe("local mod: calendar answers small enough to stay inline", () => {
+  it("asks only for the event fields it reads", async () => {
+    const { deps, frames } = relay({
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [{ id: "me@x.test", primary: true, accessRole: "owner", summary: "Me" }] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [{ id: "e1", summary: "Call", start: { dateTime: "2026-10-27T11:00:00Z" }, end: { dateTime: "2026-10-27T12:00:00Z" } }] } }),
+    });
+    const events = await createConnectedReads(deps).session().events(0, 1);
+    expect(events.map((event) => event.id)).toEqual(["e1"]);
+    const fields = String(frames.find((frame) => frame.slug === "GOOGLECALENDAR_EVENTS_LIST")!.args!.fields);
+    for (const field of ["id", "status", "summary", "description", "start", "end", "attendees(", "hangoutLink", "conferenceData/entryPoints", "recurringEventId"]) expect(fields).toContain(field);
+  });
+});
+
 describe("local mod: one retry on a passing failure", () => {
   it("tries a failed read once more and returns the second answer", async () => {
     let calls = 0;

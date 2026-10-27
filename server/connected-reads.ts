@@ -59,6 +59,10 @@ export class SourceError extends Error {
 }
 
 export const CALENDAR_LIST_TOOL = "GOOGLECALENDAR_EVENTS_LIST";
+// Local mod (Imobiturbo, 27/10/2026): Composio swaps `data` for a `data_preview` once an answer passes ~10k tokens,
+// which a busy 36-hour window does (26 events). Ask Google only for the fields calendarEvent reads.
+export const CALENDAR_EVENT_FIELDS = "items(id,status,summary,description,location,start,end,originalStartTime,recurringEventId,iCalUID,"
+  + "hangoutLink,organizer/email,attendees(email,displayName,self,organizer,responseStatus,resource),conferenceData/entryPoints(entryPointType,uri))";
 export const CALENDARS_TOOL = "GOOGLECALENDAR_LIST_CALENDARS";
 export const GMAIL_FETCH_TOOL = "GMAIL_FETCH_EMAILS";
 export const GMAIL_PROFILE_TOOL = "GMAIL_GET_PROFILE";
@@ -433,7 +437,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           try {
             const data = await call(CALENDAR_LIST_TOOL, {
               calendarId: calendar.id, timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(),
-              singleEvents: true, orderBy: "startTime", maxResults: 100, showDeleted: true,
+              singleEvents: true, orderBy: "startTime", maxResults: 100, showDeleted: true, fields: CALENDAR_EVENT_FIELDS,
             }, { signal });
             return eventsFromData(data, { id: calendar.id, owned: calendar.owned });
           } catch (error) {
