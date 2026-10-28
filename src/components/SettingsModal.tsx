@@ -4,13 +4,15 @@ import { useStore, type AppSettingsSection } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
-import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
+import { KeysPage } from "./keys/KeysPage";
+import { KEY_CATALOG, keyMatches, keySection, type KeyEntry } from "./keys/key-catalog";
+import { openKeySettings, useKeyFocus } from "./keys/key-focus";
 import { AnalyticsRow } from "./AnalyticsRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
+import { TalkShortcutRow, talkShortcutKeywords } from "./TalkShortcutRow";
 import { DiagnosticsRow } from "./DiagnosticsRow";
-import { LmStudioServer, OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -25,6 +27,7 @@ import { BuiltInBrowserRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
+import { PlaceLookCard } from "./PlaceLookCard";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
@@ -49,6 +52,7 @@ import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { ImportSettings } from "./ImportSettings";
 import { cn } from "@/lib/cn";
+import { scrollWithin } from "@/lib/scroll-within";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -75,8 +79,8 @@ export const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "product updates", "newsletter", "email updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule", "usage", "limit", "plan", "upgrade", "cloud desktop hours", "storage"] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map"] },
+  { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "product updates", "newsletter", "email updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule", "usage", "limit", "plan", "upgrade", "cloud desktop hours", "storage", ...talkShortcutKeywords()] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map", "color", "cloud color", "server color", "tint"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "deepseek", "provider", "lm studio", "lmstudio", "llm studio", "llmstudio", "bionic"] },
@@ -85,7 +89,7 @@ export const SECTIONS: Array<{
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
   { id: "logins", group: "computers", labelKey: "settings.section.logins", icon: LockKeyhole, keywords: ["logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "vault"] },
-  { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: Cloud, keywords: ["cloud", "my cloud", "account", "personal", "sign in", "pro", "subscription", "billing", "sync", "send", "this computer", "bots", "logins", "1password", "lend"] },
+  { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: Cloud, keywords: ["cloud", "my cloud", "account", "personal", "sign in", "pro", "subscription", "billing", "sync", "send", "this computer", "bots", "logins", "1password"] },
   { id: "organization", group: "account", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "usage", group: "account", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing", "plan", "quota", "remaining", "weekly", "5-hour", "model", "used"] },
   { id: "backups", group: "account", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
@@ -133,12 +137,13 @@ export function simpleSettingsPages(available: ReadonlySet<AppSettingsSection>, 
 }
 
 export function revealSettingsBlock(
-  scroller: { scrollTop: number; querySelector: (selector: string) => { scrollIntoView?: (options: ScrollIntoViewOptions) => void } | null },
+  scroller: Parameters<typeof scrollWithin>[0] & { querySelector: (selector: string) => Parameters<typeof scrollWithin>[1] | null },
   section: AppSettingsSection,
   indexInPage: number,
 ): void {
   if (indexInPage <= 0) { scroller.scrollTop = 0; return; }
-  scroller.querySelector(`[data-settings-block="${section}"]`)?.scrollIntoView?.({ block: "start" });
+  const block = scroller.querySelector(`[data-settings-block="${section}"]`);
+  if (block) scrollWithin(scroller, block);
 }
 
 function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
@@ -152,8 +157,15 @@ function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
 
 export function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
   if (!query) return true;
+  if (section.id === "connections" && KEY_CATALOG.some((entry) => keyMatches(entry, query))) return true;
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
+
+export function keySearchResults(query: string): KeyEntry[] {
+  return query ? KEY_CATALOG.filter((entry) => keyMatches(entry, query)).slice(0, 8) : [];
+}
+
+export const openKeyResult = (entry: KeyEntry) => entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id);
 
 export function SettingsModal() {
   const { state, dispatch } = useStore();
@@ -201,6 +213,8 @@ export function SettingsModal() {
   }, [dispatch, nextVisibleSection]);
 
   const [folds, setFolds] = useState<Partial<Record<SimpleDisclosureId, boolean>>>({});
+  const keyFocus = useKeyFocus();
+  useEffect(() => { if (keyFocus) setFolds((current) => current["ai-keys"] ? current : { ...current, "ai-keys": true }); }, [keyFocus]);
   const disclose: Disclose = (id) => {
     const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[requested] === id);
     return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
@@ -208,6 +222,13 @@ export function SettingsModal() {
   const [looks, setLooks] = useState(false);
   const [reveal, setReveal] = useState<string | null>(null);
   const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
+  const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
+  const keyResultButtons = (className: string) => keyResults.map((entry) => (
+    <button key={entry.id} type="button" data-settings-key-result={entry.id} className={className}
+      onClick={() => { setQuery(""); setLooks(false); dispatch(openKeyResult(entry)); }}>
+      <span>{t(entry.labelKey)} <span className="text-ink-secondary">· {t(keySection(entry).titleKey)}</span></span>
+    </button>
+  ));
 
   const sectionIndex = currentPage?.sections.indexOf(section) ?? 0;
   const revealBlock = !advanced && requested === "remote" ? "remote" : section;
@@ -216,7 +237,8 @@ export function SettingsModal() {
   }, [advanced, revealBlock, section, sectionIndex]);
   useEffect(() => {
     if (!reveal) return;
-    scrollRef.current?.querySelector(`[data-settings-block="${reveal}"]`)?.scrollIntoView?.({ block: "start" });
+    const block = scrollRef.current?.querySelector(`[data-settings-block="${reveal}"]`);
+    if (scrollRef.current && block) scrollWithin(scrollRef.current, block);
     setReveal(null);
   }, [reveal]);
 
@@ -304,6 +326,7 @@ export function SettingsModal() {
           <>
             <AdvancedModeRow />
             <DefaultBotSidebarRow />
+            <TalkShortcutRow />
 
             <ProSettingsCard />
             <CloudUsageSettings />
@@ -342,6 +365,7 @@ export function SettingsModal() {
             <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
               <SkinPicker />
             </Card>
+            <PlaceLookCard />
             {remoteActive && <AdvancedModeRow />}
             {remoteActive && <LanguageRow />}
             <FontRow />
@@ -361,51 +385,7 @@ export function SettingsModal() {
       case "experimental":
         return <ExperimentalFeaturesRow />;
       case "connections":
-        return (
-          <Card
-            title={t("settings.connections.title")}
-            subtitle={t("settings.connections.subtitle")}
-          >
-            <div className="flex flex-col gap-4">
-              {state.config?.composio.mode === "managed" ? (
-                <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
-                  {t("settings.connections.ready")}
-                </div>
-              ) : null}
-              <div className="text-[12px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.providers.title")}</div>
-              <p className="-mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("keys.providers.subtitle")}</p>
-              <ApiKeyRow section="openai" testProvider="openai" />
-              <ApiKeyRow section="anthropic" testProvider="anthropic" />
-              <AnthropicEveryClaudeBot />
-              <ApiKeyRow section="xai" testProvider="xai" />
-              <ApiKeyRow section="openrouter" testProvider="openrouter" />
-              <ApiKeyRow section="mistral" testProvider="mistral" />
-              <ApiKeyRow section="cerebras" testProvider="cerebras" />
-              <ApiKeyRow section="groq" testProvider="groq" />
-              <ApiKeyRow section="meta" testProvider="meta" />
-              <ApiKeyRow section="deepseek" />
-              <LmStudioServer />
-              <OtherOpenAiCompatServers />
-              <div className="pt-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
-              <ApiKeyRow section="treg" testProvider="treg" /><ApiKeyRow section="box" />
-              <VpsConnection />
-              <ApiKeyRow section="opencodeGo" />
-              {state.config?.cloudHome !== true && (
-                <p className="-mt-2 text-[12px] leading-relaxed text-ink-secondary">
-                  {t("keys.opencode.providersHint").split("{command}").flatMap((part, index) =>
-                    index === 0 ? [part] : [<code key={index} className="font-mono">opencode auth login</code>, part])}
-                </p>
-              )}
-              <OpenCodeProviderKeys />
-              <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-                <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("settings.connections.selfHost")}</summary>
-                <div className="mt-3">
-                  <ApiKeyRow section="composio" />
-                </div>
-              </details>
-            </div>
-          </Card>
-        );
+        return <KeysPage />;
       case "decisionModel": return <DecisionModelSettings />;
       case "engines": return <EnginesSettings />;
       case "backups": return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
@@ -449,7 +429,7 @@ export function SettingsModal() {
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
   const searchField = (className: string, inputClassName: string) => (
     <div className={className}>
-      <Search size={advanced ? 14 : 15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <Search size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
       <input
         data-settings-search
         value={query}
@@ -494,7 +474,7 @@ export function SettingsModal() {
               "mb-2 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
               "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
             )}
-            {visiblePages.length === 0 && advancedMatches.length === 0 && (
+            {visiblePages.length === 0 && advancedMatches.length === 0 && keyResults.length === 0 && (
               <div className="px-[9px] py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
             )}
             {visiblePages.map((page) => {
@@ -528,6 +508,7 @@ export function SettingsModal() {
                 <span>{t(key)} <span className="text-ink-secondary">· {t("settings.simple.advanced")}</span></span>
               </button>
             ))}
+            {keyResultButtons("flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none")}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -583,6 +564,7 @@ export function SettingsModal() {
     <div
       className="glass-popup-frame"
       data-settings-sheet
+      data-settings-look="advanced"
       style={glassPopupFrameStyle()}
       onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
@@ -602,8 +584,8 @@ export function SettingsModal() {
             {t("settings.title")}
           </div>
           {searchField(
-            "mb-2 mt-1 flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus",
-            "w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
+            "mb-2 mt-1 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
+            "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none",
           )}
           {visibleSections.length === 0 && (
             <div className="px-2.5 py-4 text-[13px] leading-relaxed text-ink-secondary">
@@ -615,7 +597,7 @@ export function SettingsModal() {
             if (entries.length === 0) return null;
             return (
               <div key={group.id} role="group" aria-labelledby={`settings-group-${group.id}`} data-settings-group={group.id} className="flex flex-col gap-0.5 pb-2">
-                <div id={`settings-group-${group.id}`} className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">
+                <div id={`settings-group-${group.id}`} className="px-[9px] pb-1 pt-2 text-[12px] font-medium leading-4 text-ink-tertiary">
                   {t(group.labelKey)}
                 </div>
                 {entries.map(({ id, labelKey, icon: Icon }) => (
@@ -625,8 +607,8 @@ export function SettingsModal() {
                     onClick={() => openSection(id)}
                     aria-current={section === id ? "page" : undefined}
                     className={cn(
-                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
-                      section === id ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
+                      "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-left text-[13px] text-ink transition-colors motion-reduce:transition-none",
+                      section === id ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
                     )}
                   >
                     <Icon size={15} className="shrink-0" />
@@ -636,6 +618,7 @@ export function SettingsModal() {
               </div>
             );
           })}
+          {keyResultButtons("cursor-pointer flex min-h-9 items-center rounded-lg px-2.5 py-2 text-left text-[13px] text-ink transition-colors hover:bg-control/50 motion-reduce:transition-none")}
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -276,6 +276,9 @@ export function clearSessionCookie(name: string): string {
 /** What a `client` session may do. Default deny: a new route is admin-only until listed here. */
 export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
+  { methods: ["GET"], path: /^\/api\/notifications$/ },
+  { methods: ["POST"], path: /^\/api\/notifications\/read-all$/ },
+  { methods: ["POST"], path: /^\/api\/notifications\/[\w-]+\/read$/ },
   // the update check only reads a version
   { methods: ["GET"], path: /^\/api\/updates\/check$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
@@ -393,8 +396,13 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/presence\/active$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
+  // a Team Cloud person's own inbox: its lines, and one of them read or done; the handler serves the session's own alone
+  { methods: ["GET"], path: /^\/api\/inbox$/ },
+  { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|done)$/ },
   // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
+  // the workspace's banner picture: everyone signed in here sees it; changing it (PUT, DELETE) is an admin's
+  { methods: ["GET"], path: /^\/api\/workspace\/banner$/ },
   // a teammate's picture: the handler serves it to the team's own members only
   { methods: ["GET"], path: /^\/api\/team\/people\/p_[\w-]{22}\/picture$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
@@ -411,7 +419,7 @@ export function requiredScope(method: string, path: string, features: { sharedCo
 
 /** A client may change how a bot looks, never what it may do. */
 const CLIENT_BOT_PATCH_FIELDS = new Set([
-  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody",
+  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor",
   "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY", "sidebarHidden", "welcomed",
 ]);
 /** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. */

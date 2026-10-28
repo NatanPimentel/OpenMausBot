@@ -16,6 +16,7 @@ import { projectMcpServers } from "./claude-project-mcp.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
+import { claudeToolSearchSetting } from "./claude-tool-search.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -656,13 +657,7 @@ function decodeConfig(raw: unknown): ClaudeConfig {
 
 function firstText(content: unknown): string {
   if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((b) => b?.type === "text" && b.text)
-      .map((b) => b.text)
-      .join("");
-  }
-  return "";
+  return Array.isArray(content) ? content.filter((b) => b?.type === "text" && b.text).map((b) => b.text).join("") : "";
 }
 
 /** A turn's cost from total_cost_usd, which is the process's running total (2.1.282): the growth
@@ -1200,7 +1195,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // in the packaged app process.execPath is Electron — run the helper as node
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
-      const settings: Record<string, unknown> = { ...authSettings };
+      const cwd = turn.cwd ?? homedir();
+      // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
+      const toolSearch = claudeToolSearchSetting(cwd, env);
+      const settings: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
       // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
       if (isolated) settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
@@ -1210,7 +1208,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (authSettingsPath) args.push("--settings", authSettingsPath);
       // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
       env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
-      const cwd = turn.cwd ?? homedir();
       const commandCwd = permissionLaunchCwd(cwd);
       const privateFileFlags = new Set(["--mcp-config", "--settings"]);
       const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
@@ -1223,6 +1220,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         base: env.ANTHROPIC_BASE_URL ?? null,
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
         hooks: Boolean(hooks),
+        toolSearch,
         // Rotating an account's key/helper must not reuse the old process.
         auth: createHash("sha256").update(JSON.stringify({
           settings: authSettings,
@@ -2063,7 +2061,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
         customMcp: true,
           computerMcp: true,
-          composioMcp: true,
+          composioMcp: true, mcpToolsFoundByName: true,
           phoneMcp: true,
           browserMcp: true,
           dataMcp: true, highlevelMcp: true, deviceMcp: true,
@@ -2091,6 +2089,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           return behavior === "allow" ? "allowed-once" : behavior === "answer" ? "answered" : "rejected";
         },
         hasSession: (threadId) => active.has(threadId),
+        enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
         cacheKeepWarm: {
           ping: async (threadId, options) => {
             const live = sessions.get(threadId);

@@ -130,7 +130,7 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
 | `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
 | `DELETE /api/team/my-connections/apps/:slug` | the member | |
 | `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
-| `PUT /api/team/my-connections/mcp/:name/key { value }` | the member | write-only |
+| `PUT /api/team/my-connections/mcp/:name/key { value, url? }` | the member | write-only; with `url`, returns 409 if the server URL changed |
 | `DELETE /api/team/my-connections/mcp/:name` | the member | |
 
 The signed read (`GET /api/cloud/team/admin`) adds `scopes: { apps, mcp }` and `people: { apps: { <slug>: [address] },
@@ -346,7 +346,28 @@ anyone's inbox. A member without any bot of their own gets the notification wher
 turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its
 conversation gets a line from the inbox's bot, "Marco replied to your message ("…"): …" (`relay.kind: "reply"`), which
 starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Philipp yes") works
-too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line.
+too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line. A 👍
+or 👎 on a line answers it the same way, with that emoji.
+
+**What waits on the person** is read from where it was asked, each time. An ask waits while the card that asked is open
+in its conversation: once it is answered there, from the inbox's copy (either respond route), by a reaction or on a
+call, or closed (an approval whose turn ended or was stopped, a question the person closed), it no longer waits, and the
+copy follows the card. A question its turn left open still waits for a late answer; once its conversation is deleted,
+the copy is closed. A line that wants an answer waits until the person answers it, from the inbox or with a line of
+their own in the conversation it came from. The inbox's task carries the asks that wait (`WireTask.openAsks`, sent again
+whenever one is asked or settled), which the app shows on the person's own row under People and adds to its unread
+count: the browser tab's title and the app's icon.
+
+**The inbox's list and its card.** `GET /api/inbox` lists the session's own person's inbox (`InboxView`,
+`shared/inbox.ts`), newest first, each line in one tab: **Needs you** while it waits on them (an ask, by the rule above;
+their count is the badge), **For your info** for news until they answer it or mark it done, and **Done** once it is
+settled or marked done. `POST /api/inbox/<line>/done` marks news done (an open ask refuses, 409: only its answer settles
+it) and `POST /api/inbox/<line>/read` marks one line read; each answers with the list as it is now. The app shows the
+list in the right panel, opened from the card, the badge or the person's own row under People: dense rows with each
+line's quick answers, a reading view with the reply, and a sheet at phone width. Answering from a row answers the copy's
+card or replies to the line, through the same routes as in the chat. In the inbox conversation one card sits under the
+newest line that needed the person (`InboxView.anchor`) and updates in place. The inbox's task carries
+`inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.
 
 **The representative.** When a message asks something a fact the person already shares with the team answers, their
 inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Marco's
@@ -376,9 +397,9 @@ sidebar lists the team's people with their pictures: your own row opens your inb
 the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
 it (`shared/person-mention.ts`). A bot's turn is told the team's people (names and admin roles; not the person it talks
 with), that `message_person` reaches their inbox, and that a tag already did. Needs you lists the inbox's messages the
-person has not opened (`kind: "message"`); the app opens the inbox on the person's first arrival of the day when
-something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who leaves takes
-their inbox with them.
+person has not opened and that still wait (`kind: "message"`); the app opens the inbox on the person's first arrival of
+the day when something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who
+leaves takes their inbox with them.
 
 On a My Cloud and on a desktop there are no team people: the @ list shows bots, `@you` and the profile name tag the one
 person as before, and `message_person` and the inbox do not exist.

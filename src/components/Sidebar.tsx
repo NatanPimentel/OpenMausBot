@@ -4,8 +4,8 @@ import { createPortal } from "react-dom";
 import { Activity, Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, Library, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, PanelLeftClose, PanelLeftOpen, Phone, Pin, PinOff, Plus, Search, TextQuote, Trash2, Users, X } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
-import { liveActivityLabel, turnNowPhrases } from "@/lib/live-activity";
-import { useTurnLive } from "@/state/turn-status";
+import { liveActivityLabel } from "@/lib/live-activity";
+import { SidebarWorkingStep } from "./SidebarWorkingStep";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
@@ -24,7 +24,6 @@ import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect
  
 import { StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { WorkingDots } from "./WorkingIndicator";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
@@ -91,15 +90,17 @@ import { PhoneHero } from "./SidebarPhoneHero";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
-import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher";
+import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { railShown, usePlaces } from "@/lib/places"; import { PlaceTint } from "./PlaceTint";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerFace, OwnerPickerHost, pickOwnerOf } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople";
 import { showWhoReportsToWhom, TeamMenuItems } from "./SidebarTeamMenu";
+import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
+import { ELEVATED_CONTROL } from "./elevated";
 import { departmentOwner, useTeamPeople } from "@/state/team-people";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
-import { PHONE_TOP_BUTTON, SIMPLE_MENU, SIMPLE_MENU_ITEM, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
+import { PHONE_TOP_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -205,10 +206,10 @@ export function GroupListItem({
         onMenu({ groupId: group.id, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       }}
       className={cn(
-        "relative flex w-full items-center rounded-md text-left", advanced ? "outline-none focus-visible:ring-1 focus-visible:ring-accent/60" : SIMPLE_ROW_FOCUS,
+        "relative flex w-full items-center rounded-md text-left", SIMPLE_ROW_FOCUS,
         density === "icons" ? (railTile ? "h-[54px] justify-center" : "justify-center px-1 py-1.5") : density === "compact" ? "gap-1.5 py-1 pl-6 pr-9" : simpleRow
           ? cn("gap-2 rounded-[10px] py-2 pr-2 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9 md:h-[54px] md:py-0", !group.dm && hasThreadList ? "pl-6" : "pl-2") : "gap-2 py-1.5 pl-6 pr-9",
-        advanced ? selected && !expanded ? "bg-raised/70" : "hover:bg-raised/40" : selected && !expanded ? "bg-raised" : "hover:bg-raised/50",
+        selected && !expanded ? "bg-raised" : "hover:bg-raised/50",
       )}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
@@ -271,8 +272,6 @@ function RoomContextMenu({
   const shown = motion.value;
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const advanced = useAdvancedMode();
-  const roomRow = advanced ? "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" : SIMPLE_MENU_ITEM;
   const group = shown ? state.groups.find((g) => g.id === shown.groupId) : undefined;
   const [renaming, setRenaming] = useState(false);
   const [describing, setDescribing] = useState(false);
@@ -326,7 +325,7 @@ function RoomContextMenu({
       aria-label={t("sidebar.bot.actions", { name: group.name })}
       onKeyDown={navigateThreadMenu}
       style={{ top, left }}
-      className={cn(advanced ? "popover-surface fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60" : cn("fixed z-40 w-[228px] overflow-hidden", SIMPLE_MENU), motion.className)} {...motion.exitProps}
+      className={cn("fixed z-40 w-[228px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
       {!remoteClient && describing ? (
         <div className="flex items-center gap-1 px-2 py-1">
@@ -416,7 +415,7 @@ function RoomContextMenu({
             setDraft(group.name);
             setRenaming(true);
           }}
-          className={cn(roomRow, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
         >
           <Pencil size={16} className="text-ink-secondary" />
           {isBotChat ? t("sidebar.room.renameChat") : t("sidebar.room.renameChannel")}
@@ -429,7 +428,7 @@ function RoomContextMenu({
             setDescriptionDraft(group.description ?? "");
             setDescribing(true);
           }}
-          className={cn(roomRow, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
         >
           <TextQuote size={16} className="text-ink-secondary" />
           {t("sidebar.room.setDescription")}
@@ -442,7 +441,7 @@ function RoomContextMenu({
             onClose();
             onMoveToSection(group.id);
           }}
-          className={cn(roomRow, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
         >
           <FolderPlus size={16} className="text-ink-secondary" />
           {t("sidebar.section.moveToContext")}
@@ -454,7 +453,7 @@ function RoomContextMenu({
           void copyText(group.threadId);
           onClose();
         }}
-        className={cn(roomRow, "text-ink hover:bg-menu-hover")}
+        className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
       >
         <ClipboardCopy size={16} className="text-ink-secondary" />
         {t("sidebar.copyConversationId")}
@@ -465,7 +464,7 @@ function RoomContextMenu({
           onClose();
           onDelete(group.id);
         }}
-        className={cn(roomRow, "text-danger hover:bg-menu-hover")}
+        className={cn(MENU_ITEM, "text-danger hover:bg-menu-hover")}
       >
         <Trash2 size={16} />
         {isBotChat ? t("sidebar.room.deleteChat") : t("sidebar.room.deleteChannel")}
@@ -723,11 +722,6 @@ export function useVisibleMessages(bot: Bot): Message[] {
   return useMemo(() => visibleMessages({ messages, activeLeafId }), [messages, activeLeafId]);
 }
 
-function WorkingPhrase({ threadId, last }: { threadId: string; last?: Message }) {
-  const live = useTurnLive(threadId);
-  return <span dir="auto" data-sidebar-working-phrase="" className="truncate">{turnNowPhrases(live.status, last)?.phrases[0] ?? t("chat.activity.thinking")}</span>;
-}
-
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const advanced = useAdvancedMode();
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu, renameRequest } = props;
@@ -752,7 +746,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const title = bot.title.trim();
   const details = [title, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : ""].filter(Boolean);
   const rowClass = cn(
-    "flex w-full items-center rounded-xl text-left transition-colors duration-150", advanced ? "outline-none focus-visible:ring-1 focus-visible:ring-accent/60" : SIMPLE_ROW_FOCUS,
+    "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly
       ? railTile ? "h-[54px] justify-center" : "justify-center px-1 py-1.5"
       : density === "compact"
@@ -760,7 +754,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         : simpleRow ? "gap-2 rounded-[10px] py-2 pl-2 pr-2 md:h-[54px] md:py-0"
         : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    selected ? advanced ? "bg-raised shadow-[0_1px_2px_rgb(0_0_0/0.10)]" : "bg-raised" : "hover:bg-raised/50",
+    selected ? "bg-raised" : "hover:bg-raised/50",
     simpleRow && rowSurface(selected),
   );
   const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
@@ -778,7 +772,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           motionKey={mascotMotion?.nonce ?? 0}
           animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
         />
-        {iconOnly && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} subtle={railTile} />}
+        {iconOnly && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}
         {simpleRow && <AvatarActivityDot activity={working ? "working" : teammateWait ? "teammate" : queued && !waiting ? "queued" : null} />}
         {!simpleRow && working && (
           <span
@@ -867,13 +861,8 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             </span>
           ) : (
             <span className={cn("flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px]", waiting ? simpleRow ? "text-warning" : "font-semibold text-warning" : "text-ink-secondary")}>
-              {working && simpleList ? (
-                <WorkingPhrase threadId={bot.threadId} last={last} />
-              ) : working ? (
-                <span className="flex h-[1.5em] items-center" role="status">
-                  <WorkingDots size={3.5} />
-                  <span className="sr-only">{t("sidebar.preview.working")}</span>
-                </span>
+              {working ? (
+                <SidebarWorkingStep bot={bot} last={last} />
               ) : (
                 <span dir="auto" className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</span>
               )}
@@ -1149,7 +1138,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     }
   };
 
-  const macInset = capabilities.windowChrome === "mac-inset";
+  const macInset = capabilities.windowChrome === "mac-inset", railBeside = railShown(usePlaces());
   const browser = capabilities.host.label === "Browser";
   const draggableChrome = macInset || capabilities.windowChrome === "win-caption";
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
@@ -1288,7 +1277,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     setSearchOpen(true);
     toggleCollapsed();
   };
-  const plusItem = advanced ? "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-menu-hover" : cn(SIMPLE_MENU_ITEM, "text-ink hover:bg-menu-hover");
+  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover");
   const plusControl = (
     <div ref={plusMenuRef} className="contents">
     <button
@@ -1296,17 +1285,17 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       onClick={() => setPlusOpen((o) => !o)}
       aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
       className={phone ? PHONE_TOP_BUTTON : rail || simple ? SIMPLE_TOP_BUTTON : cn(
-        "flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-        density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
+        "flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-full",
       )}
       title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
     >
-      <Plus size={phone || simple || density === "icons" ? 20 : 17} strokeWidth={simpleDesk || rail ? 1.5 : 2} />
+      <Plus size={phone || simple || density === "icons" ? 20 : 18} strokeWidth={phone ? 2 : 1.5} />
     </button>
     {plusMotion.shown && (
       <>
         <div role="menu" aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")} onKeyDown={navigateThreadMenu} className={cn(
-          advanced ? "popover-surface absolute z-40 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60" : cn("absolute z-40 w-max min-w-[200px] overflow-hidden", SIMPLE_MENU),
+          "absolute z-40 w-max min-w-[200px] overflow-hidden", MENU_SHEET,
           rail ? "left-full top-0 ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0"),
           plusMotion.className,
         )} {...plusMotion.exitProps}>
@@ -1384,7 +1373,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       tabIndex={-1}
       aria-label={t("sidebar.aria")}
       data-native-view-overlay
-      data-sidebar
+      data-sidebar data-cloud-sky={state.config?.cloudHome === true ? density === "icons" ? "rail" : advanced ? "advanced" : "simple" : undefined}
       onClick={(event) => {
         // The phone's list covers the whole screen: choosing the bot that is already open has to dismiss it too.
         if (phone && open && event.target instanceof Element && !(event.target instanceof HTMLInputElement) && event.target.closest("[data-sidebar-bot-row], [data-sidebar-hero]")) onClose();
@@ -1393,7 +1382,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       onPointerLeave={() => showEdge(false)}
       style={{ "--sidebar-width": `${sizing.width}px` } as CSSProperties}
       className={cn(
-        advanced ? "relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel" : "relative flex h-full shrink-0 flex-col border-r border-ink/[0.04] bg-panel max-md:[--scroll-fade-surface:var(--color-app)]",
+        "relative flex h-full shrink-0 flex-col border-r border-ink/[0.04] bg-panel max-md:[--scroll-fade-surface:var(--color-app)]",
         sizing.resizing ? "transition-none" : "transition-[width] duration-200",
         density === "icons" ? rail ? "w-[92px]" : "w-[80px]" : density === "compact" ? "w-[272px] md:w-[var(--sidebar-width)]" : advanced ? "w-[320px] md:w-[var(--sidebar-width)]" : "w-[280px] md:w-[var(--sidebar-width)]",
         sidePanelOpen ? density === "compact" ? "md:max-w-[272px]" : advanced ? "md:max-w-[320px]" : "md:max-w-[280px]" : "md:max-w-[calc(100vw-320px)]",
@@ -1404,7 +1393,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      <GlassScrollFrame className="flex-1" fade={!advanced}>
+      <GlassScrollFrame className="flex-1" fade><PlaceTint />
       <GlassBar edge="top">
       <div
         data-sidebar-top-row
@@ -1419,7 +1408,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           <div className="shrink-0" style={windowNoDragStyle}><SidebarProfileMenu iconOnly circle /></div>
         ) : macInset ? (
           // The macOS 26 traffic lights span 16-76px; nothing clickable starts before 88px.
-          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-[72px] shrink-0"} />
+          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : railBeside ? "w-[72px] shrink-0 md:w-3" : "w-[72px] shrink-0"} />
         ) : browser ? (
           <div className={cn("flex shrink-0 items-center gap-2", density !== "icons" && "mr-3", simpleDesk && "mt-1")}>
             <span className="size-3 rounded-full bg-[#ff5f57]" />
@@ -1452,12 +1441,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             onClick={toggleCollapsed}
             aria-label={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapseAria")}
             className={cn(
-              "flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-              density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
+              "flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+              density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-full",
             )}
             title={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapse")}
           >
-            {density === "icons" ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={17} />}
+            {density === "icons" ? <PanelLeftOpen size={20} strokeWidth={1.5} /> : <PanelLeftClose size={18} strokeWidth={1.5} />}
           </button>}
           {density === "icons" && <button
             type="button"
@@ -1466,7 +1455,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             title={t("sidebar.searchAria")}
             className="flex size-[46px] shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            <Search size={20} strokeWidth={2} />
+            <Search size={20} strokeWidth={1.5} />
           </button>}
           {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
             <button
@@ -1475,11 +1464,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
               aria-label={attentionTriggerLabel(attention.length)}
               title={attentionTriggerLabel(attention.length)}
               className={cn(
-                "relative flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-md",
+                "relative flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full",
               )}
             >
-              <Activity size={density === "icons" ? 20 : 17} strokeWidth={2} />
+              <Activity size={density === "icons" ? 20 : 18} strokeWidth={1.5} />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
               )}
@@ -1490,27 +1479,27 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {attentionMotion.shown && (
               <>
                 <div className={cn(
-                  "popover-surface absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                  "absolute top-full z-40 mt-1 overflow-hidden", MENU_SHEET,
                   density === "icons" ? "left-0" : "right-0",
                   density === "icons" ? "w-72" : density === "compact" ? "w-60 md:w-[min(240px,calc(var(--sidebar-width)_-_32px))]" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
                   attentionMotion.className,
                 )} {...attentionMotion.exitProps}>
-                  <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
+                  <div className="flex items-center gap-1 py-0.5 pl-2">
                     <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
                     <button
                       type="button"
                       onClick={() => setAttentionPinned(!attentionPinned)}
                       aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
                       title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      className="flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
                       {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
                   </div>
                   {attention.length === 0 ? (
-                    <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
+                    <div className="px-2 py-1.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
                   ) : (
-                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
+                    <AttentionThreadRows inset entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
                   )}
                 </div>
               </>
@@ -1523,15 +1512,15 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       {density === "icons" && !rail && <DesktopWorkspaceSwitcher compact cloudHome={state.config?.cloudHome === true} owner={cloudOwner} howTo={state.cloudHowTo} onMenuClosed={endHowTo} />}
       <OrganizationIdentity compact={density === "icons"} />
       {phone ? null : simple ? searchShown && <SidebarSearchPill query={query} onQuery={setQuery} onClose={closeSearch} /> : <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
-        <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-focus">
-          <Search size={14} className="text-ink-secondary" />
+        <div className={cn("flex h-8 items-center gap-2 rounded-full px-3 focus-within:ring-focus", ELEVATED_CONTROL)}>
+          <Search size={15} className="shrink-0 text-ink-secondary" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             placeholder={t("sidebar.search")}
             aria-label={t("sidebar.searchAria")}
-            className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none"
           />
         </div>
       </div>}
@@ -1781,7 +1770,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={renamedTeam} onClose={() => setRenameTeam(null)} />}
       {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
         <div role="menu" aria-label={teamMotion.value.name} style={{ left: teamMotion.value.x, top: teamMotion.value.y }}
-          className={cn("absolute w-[256px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl", teamMotion.className)} {...teamMotion.exitProps}
+          className={cn("absolute w-[256px] text-ink", MENU_SHEET, teamMotion.className)} {...teamMotion.exitProps}
           onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
             if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); closeTeamMenu(); return; }
             navigateThreadMenu(event);

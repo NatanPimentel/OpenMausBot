@@ -39,17 +39,8 @@ function parseSkins(source) {
   }
   // The phone block re-declares some tokens of a skin under a width query, so
   // that skin is measured twice: as it renders on desktop and as "<id> (phone)".
-  const phoneTokens = new Map();
   for (const [, id, body] of phone.matchAll(/\[data-skin="([a-z-]+)"\]\)?\s*\{([^}]*)\}/g)) {
-    phoneTokens.set(id, declarations(body));
-    skins.set(`${id} (phone)`, { ...skins.get(id), ...phoneTokens.get(id) });
-  }
-  // Advanced mode re-declares some tokens of a skin, measured as "<id> (advanced)",
-  // and with the phone block over it as "<id> (advanced, phone)".
-  for (const [, id, body] of desktop.matchAll(/\[data-skin="([a-z-]+)"\]:where\(:root\[data-interface="advanced"\][^{]*\{([^}]*)\}/g)) {
-    const advanced = { ...skins.get(id), ...declarations(body) };
-    skins.set(`${id} (advanced)`, advanced);
-    if (phoneTokens.has(id)) skins.set(`${id} (advanced, phone)`, { ...advanced, ...phoneTokens.get(id) });
+    skins.set(`${id} (phone)`, { ...skins.get(id), ...declarations(body) });
   }
   return skins;
 }
@@ -202,12 +193,12 @@ for (const [id, tokens] of skins) {
     continue;
   }
   for (const { fg, bg, ratio } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(.*\)$/, "")}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     if (floor === undefined || ratio < floor - BASELINE_DRIFT) skinFailed = true;
   }
   console.log(`${skinFailed ? "✗" : "~"} ${id}${skinFailed ? "" : " (known upstream gaps)"}`);
   for (const { fg, bg, ratio, min } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(.*\)$/, "")}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     const baseline = floor === undefined ? "" : `; baseline ${floor.toFixed(2)}:1`;
     console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1${baseline})`);
   }
@@ -250,6 +241,69 @@ for (const skinId of ["daylight", "pop"]) {
     }
   }
   if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
+}
+
+// MausBot Cloud's night card paints its own sky in every skin: an indigo dusk in the light scheme, a deep night in the
+// dark one. Its text sits between the sky's first two stops; the close button's glyph also lands on the far stop.
+const night = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(([, body]) => declarations(body)).find(tokens => tokens["--cloud-night-from"]);
+if (!night) {
+  failed = true;
+  console.log("✗ night card — no :root block defines --cloud-night-from");
+} else {
+  for (const [scheme, pick] of [["dusk", 1], ["night", 2]]) {
+    const value = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[pick] ?? night[token] ?? "";
+    let schemeFailed = false;
+    for (const [fg, bg, min] of [
+      ["--cloud-night-ink", "--cloud-night-from", 4.5],
+      ["--cloud-night-ink", "--cloud-night-mid", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-from", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-mid", 4.5],
+      ["--cloud-night-ink-quiet", "--cloud-night-to", 3],
+    ]) {
+      const ratio = contrast(value(fg), value(bg));
+      if (ratio === null || ratio < min) {
+        failed = true;
+        schemeFailed = true;
+        console.log(`✗ night card (${scheme}) — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs ${min}:1)`);
+      }
+    }
+    if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
+  }
+}
+
+// A Cloud's sidebar lays a wash of one night colour over its panel (src/styles.css [data-cloud-sky]::before): every ink
+// must read on the panel with that wash at its strongest.
+const washOf = (rule) => ({ token: /var\((--cloud-night-[\w-]+)\)\)/.exec(rule ?? "")?.[1], strength: Number(/opacity: ([\d.]+);/.exec(rule ?? "")?.[1]) });
+const washLight = washOf(/\n\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
+const washDark = washOf(/@container style\(--code-color-scheme: dark\) \{\s*\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
+if (!night || !washLight.token || !washDark.token || !(washLight.strength > 0) || !(washDark.strength > 0)) {
+  failed = true;
+  console.log("✗ Cloud sidebar — cannot read the wash's strength or the night tokens");
+} else {
+  const hex = ({ r, g, b }) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  let washFailed = false;
+  for (const [id, tokens] of skins) {
+    const dark = tokens["--code-color-scheme"] === "dark";
+    const pick = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[dark ? 2 : 1];
+    const panel = parseHex(tokens["--color-panel"] ?? "");
+    const problems = [];
+    const wash = dark ? washDark : washLight;
+    const tint = parseHex(pick(wash.token) ?? "");
+    if (!panel || !tint) problems.push(`cannot measure ${wash.token} over --color-panel`);
+    else {
+      const washed = hex(flatten({ ...tint, a: wash.strength }, panel));
+      for (const fg of ["--color-ink", "--color-ink-secondary", "--color-ink-tertiary"]) {
+        const ratio = contrast(tokens[fg] ?? "", washed);
+        if (ratio === null || ratio < 4.5) problems.push(`${fg} on the panel under ${wash.token}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+      }
+    }
+    if (problems.length) {
+      failed = true;
+      washFailed = true;
+      for (const problem of problems) console.log(`✗ ${id} Cloud sidebar — ${problem}`);
+    }
+  }
+  if (!washFailed) console.log(`✓ Cloud sidebar — every skin's inks read under the night wash (${washLight.token} at ${washLight.strength} light, ${washDark.token} at ${washDark.strength} dark)`);
 }
 
 process.exit(failed ? 1 : 0);

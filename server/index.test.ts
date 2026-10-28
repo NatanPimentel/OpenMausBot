@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -460,7 +460,7 @@ beforeAll(async () => {
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
-      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); one test turns the setup card's answers on
+      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); the setup card's tests turn its answers on
       features: { llmThreadTitles: true, browser: false, smartSetupChoices: false },
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
@@ -1189,6 +1189,8 @@ beforeAll(async () => {
   // Emulates only our temporary browser executable (also on Windows, where the marker is not executable).
   const browserPrelude = `data:text/javascript,${encodeURIComponent(`
     import childProcess from "node:child_process";
+    import fs from "node:fs";
+    import path from "node:path";
     import { syncBuiltinESMExports } from "node:module";
     const spawn = childProcess.spawn;
     const base = ${JSON.stringify(home)};
@@ -1201,6 +1203,20 @@ beforeAll(async () => {
         + 'process.exit(fs.existsSync(path.join(base, "browser-clear-fails")) ? 1 : 0);';
       return spawn(process.execPath, ["-e", program, ...args], options);
     };
+    const read = fs.read;
+    fs.read = Object.defineProperties(function(input, ...args) {
+      const gate = path.join(base, "browser-upload-read-gate");
+      if (!fs.existsSync(gate) || fs.fstatSync(input).ino !== fs.statSync(fs.readFileSync(gate, "utf8")).ino) {
+        return read(input, ...args);
+      }
+      fs.rmSync(gate);
+      fs.writeFileSync(gate + ".entered", "");
+      const timer = setInterval(() => {
+        if (!fs.existsSync(gate + ".release")) return;
+        clearInterval(timer);
+        read(input, ...args);
+      }, 10);
+    }, Object.getOwnPropertyDescriptors(read));
     syncBuiltinESMExports();
   `)}`;
   child = spawn(process.execPath, ["--import", browserPrelude, join(SERVER_DIR, "index.ts")], {
@@ -1588,6 +1604,8 @@ describe("harness HTTP API", () => {
     expect(theirs.status).toBe(202);
     expect(theirs.body.message).toMatchObject({ role: "user", sender: { name: "Safari on Mac" } });
 
+    // A message steers into a turn its engine is running; one sent while that turn is still being set up waits for it.
+    await expect.poll(() => claudePrompts().some((line) => line.includes("from the paired person")), { timeout: 10_000 }).toBe(true);
     const steered = await person.call("POST", `/api/bots/${bot.id}/messages`, { text: "and one more" });
     expect(steered.status).toBe(202);
     expect(steered.body.message).toMatchObject({ steered: true, sender: { name: "Safari on Mac" } });
@@ -7798,6 +7816,45 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("writes a new bot's setup answers again when it is renamed before anyone answers, and without the name for a picked one", async () => {
+    const hiring = ["Screen my new candidates", "Draft a job post", "Schedule my interviews", "Find candidates on job sites", "Remind me to follow up"];
+    const everyday = ["Find cheap flights", "Sort my inbox", "Check my calendar", "Draft a cover letter", "Remind me to pay bills"];
+    const greeting = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages[0];
+    const settled = async (threadId: string) => {
+      await expect.poll(async () => { const line = await greeting(threadId); return line.setupChoicesPending ?? line.setupChoicesUpdating ?? null; }, { timeout: 10_000 }).toBeNull();
+      return greeting(threadId);
+    };
+    const answer = (choices: string[]) => { writeFileSync(setupAnswersFile, `${JSON.stringify(choices)}\n`); rmSync(setupAnswersDump, { force: true }); };
+    let id = "";
+    expect((await api("PUT", "/api/config", { features: { smartSetupChoices: true } })).status).toBe(200);
+    try {
+      rmSync(setupAnswersFile, { force: true });
+      const created = await api("POST", "/api/bots", { name: "Pepper", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
+      expect(created.status).toBe(201);
+      id = created.body.bot.id;
+      const { threadId } = created.body.bot;
+      const fixed = created.body.bot.messages[0].setupChoices;
+      expect((await settled(threadId)).setupChoices).toEqual(fixed);
+
+      answer(hiring);
+      expect((await api("PATCH", `/api/bots/${id}`, { name: "Recruiter" })).status).toBe(200);
+      expect((await greeting(threadId)).setupChoicesUpdating).toEqual(expect.any(Number));
+      expect((await settled(threadId)).setupChoices).toEqual(hiring);
+      expect((await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump)).prompt).toContain("Bot name: Recruiter");
+
+      answer(everyday);
+      expect((await api("PATCH", `/api/bots/${id}`, { name: "Pesto" })).status).toBe(200);
+      const unnamed = await settled(threadId);
+      const rewritten = existsSync(setupAnswersDump) ? await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump) : null;
+      expect(unnamed.setupChoices).toEqual(rewritten ? everyday : fixed);
+      expect(rewritten?.prompt ?? "").not.toContain("Bot name:");
+    } finally {
+      rmSync(setupAnswersFile, { force: true });
+      if (id) await api("DELETE", `/api/bots/${id}`);
+      await api("PUT", "/api/config", { features: { smartSetupChoices: false } });
+    }
+  });
+
   it("validates approval decisions and reports a request that is no longer open", async () => {
     const { body } = await api("GET", "/api/bots");
     const bot = body.bots[0];
@@ -8114,7 +8171,7 @@ describe("harness HTTP API", () => {
 
       const rotated = await api("PUT", "/api/config", { box: { token: " box_route_rotated " } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       expect(JSON.stringify(rotated.body)).not.toContain("box_route_rotated");
 
       expect((await api("POST", "/api/computers/boxes/bx_23456789/delete", { confirmName: name })).status).toBe(202);
@@ -8151,7 +8208,7 @@ describe("harness HTTP API", () => {
       managedBoatRejectedTokens.delete("Bearer box_route_rotated");
       const rotated = await api("PUT", "/api/config", { box: { token: "box_route_rotated" } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       if (provisioned) {
         const journal = readFileSync(join(home, ".openmausbot", "box-create-requests.json"), "utf8");
         expect(journal).toContain(managedBoatCreateId);
@@ -8489,7 +8546,7 @@ describe("harness HTTP API", () => {
     try {
       const created = await api("POST", "/api/mcp/servers", { name: "docs", url: fake.url, headers: { Authorization: secret } });
       expect(created.status).toBe(201);
-      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true }]);
+      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true, scope: "team" }]);
       expect(JSON.stringify(created.body)).not.toContain(secret);
 
       const tested = await api("POST", "/api/mcp/servers/docs/test");
@@ -8536,7 +8593,7 @@ describe("harness HTTP API", () => {
       const first = await api("POST", "/api/mcp/servers/hf/test");
       expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
       expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([
-        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in" },
+        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in", scope: "team" },
       ]);
 
       const started = await api("POST", "/api/mcp/servers/hf/sign-in");
@@ -8601,7 +8658,7 @@ describe("harness HTTP API", () => {
       const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true, scope: "team",
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 
@@ -9789,6 +9846,77 @@ describe("harness HTTP API", () => {
         expect(configCleanup.status, JSON.stringify(configCleanup.body)).toBe(200);
         expect(botCleanup.status, JSON.stringify(botCleanup.body)).toBe(200);
       }
+    }
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
+    { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
+    { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
+    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
+  ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const gate = join(home, "browser-upload-read-gate");
+    const folder = join(home, ".openmausbot", "browser-uploads");
+    const backup = folder + ".backup";
+    let blockedFolder = false;
+    let pending: Promise<Response> | undefined;
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { browser: true }, browserEngine: { engine: "chrome" },
+      })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        approvalMode: "auto", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const workspace = join(home, ".openmausbot", "workspaces", bot.id);
+      mkdirSync(workspace, { recursive: true });
+      const files = sizes.map((size, i) => {
+        const file = join(workspace, `upload-${i}.bin`);
+        writeFileSync(file, "");
+        truncateSync(file, size);
+        return file;
+      });
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Upload the synthetic files." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as {
+        mcpConfig: { mcpServers: { browser: { env: Record<string, string> } } };
+      };
+      if (mode === "disk") {
+        if (existsSync(folder)) renameSync(folder, backup);
+        writeFileSync(folder, "not a directory");
+        blockedFolder = true;
+      }
+      if (mode === "changed" || mode === "stop") writeFileSync(gate, files[0]!);
+      pending = fetch(`${BASE}/api/internal/browser/mcp`, {
+        method: "POST", headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${dump.mcpConfig.mcpServers.browser.env.OMB_MCP_TOKEN_BROWSER}`,
+        },
+        body: JSON.stringify({ method: "tools/call", params: { name: "agent_browser_upload", arguments: { files } } }),
+      });
+      if (mode === "changed" || mode === "stop") {
+        await expect.poll(() => existsSync(gate + ".entered")).toBe(true);
+        truncateSync(files[0]!, 0);
+        if (mode === "stop") expect((await api("POST", `/api/bots/${bot.id}/interrupt`, {})).status).toBe(200);
+        writeFileSync(gate + ".release", "");
+      }
+      const response = await pending;
+      const body = await response.json();
+      expect({ status: response.status, body }).toEqual({
+        status, body: status === 200 ? { result: { isError: true, content: [{ type: "text", text: message }] } } : { error: message },
+      });
+    } finally {
+      writeFileSync(gate + ".release", "");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await pending?.catch(() => undefined);
+      for (const file of [gate, gate + ".entered", gate + ".release"]) rmSync(file, { force: true });
+      if (blockedFolder) {
+        rmSync(folder, { force: true });
+        if (existsSync(backup)) renameSync(backup, folder);
+      }
+      await api("PATCH", "/api/config", { features: { browser: false }, browserEngine: { engine: "agent-browser" } }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
     }
   });
 
@@ -11693,7 +11821,7 @@ describe("harness HTTP API", () => {
     });
     expect(saved.status).toBe(200);
     expect(saved.body.composio).toEqual({ configured: true, mode: "self-hosted" });
-    expect(saved.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(saved.body.opencodeGo).toEqual({ configured: true, last4: "rnal", providerKeys: [] });
     expect(saved.body.profile).toEqual({ name: "External Store", email: "", aboutMe: "" });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
@@ -12272,11 +12400,11 @@ describe("harness HTTP API", () => {
   it("stores OpenCode Go credentials as a configured-only status", async () => {
     const put = await api("PUT", "/api/config", { opencodeGo: { apiKey: "opencode-secret" } });
     expect(put.status).toBe(200);
-    expect(put.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(put.body.opencodeGo).toEqual({ configured: true, last4: "cret", providerKeys: [] });
     expect(JSON.stringify(put.body)).not.toContain("opencode-secret");
 
     const after = await api("GET", "/api/config");
-    expect(after.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
+    expect(after.body.opencodeGo).toEqual({ configured: true, last4: "cret", providerKeys: [] });
     expect(JSON.stringify(after.body)).not.toContain("opencode-secret");
   });
 

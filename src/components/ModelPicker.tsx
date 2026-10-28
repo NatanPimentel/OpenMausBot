@@ -7,11 +7,15 @@ import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, type ModelChoice } from "@/lib/model-choices";
+export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { isTypeaheadKey, TYPEAHEAD_RESET_MS, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { InstanceProviderMark } from "./ProviderIcons";
-import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
+import { ApiKeyHint, EngineSetup, EngineUpdateNotice, needsCli, needsSignIn, openKeysFor } from "./EngineSetup";
+import { offersLocalModels, probeLocalModels } from "./local-model-probe";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
@@ -32,7 +36,6 @@ import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { Select } from "./Select";
 
-type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
 
 function modelLabel(instance: InstanceInfo | undefined, model: string): string {
@@ -41,29 +44,6 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 
 function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
   return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
-export const LOCAL_PROBE_TIMEOUT_MS = 5_000;
-
-export function probeLocalModels(
-  instanceId: string,
-  refreshModels: (instanceId: string) => Promise<void>,
-  timeoutMs = LOCAL_PROBE_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    void refreshModels(instanceId)
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
-}
-
-export function offersLocalModels(instance: InstanceInfo | undefined, localCount: number): boolean {
-  if (!instance) return false;
-  return localCount > 0 || (instance.driverKind === "claudeAgent" && !needsCli(instance) && !instance.policy);
 }
 
 export function effortLabel(level: EffortLevel): string {
@@ -231,16 +211,6 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
       )}
     </div>
   );
-}
-
-export function modelSelectionForPick(selection: ModelSelection, instance: InstanceInfo, model: string): ModelSelection {
-  const next: ModelSelection = { instanceId: instance.instanceId, model };
-  if (instance.instanceId === selection.instanceId) {
-    if (instance.capabilities?.modelVariants) {
-      if (model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
-    } else if (selection.effort) next.effort = selection.effort;
-  }
-  return next;
 }
 
 const POPOVER_WIDTH = 420;
@@ -441,7 +411,7 @@ export function ModelPicker({
 
   const openApiKeys = () => {
     close(false);
-    dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
+    dispatch(openKeysFor(railInstance));
   };
   const openEngines = () => {
     close(false);
@@ -510,9 +480,10 @@ export function ModelPicker({
     dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: false, selection: profile.modelSelection });
   };
 
-  const pick = (instance: InstanceInfo, model: string) => {
+  const pick = (instance: InstanceInfo, model: string, variant?: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
+    if (variant !== undefined) nextSelection.variant = variant;
     const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
@@ -534,9 +505,16 @@ export function ModelPicker({
     close(true);
   };
 
-  const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
+  const resetVariant = contained && selection.variant !== undefined ? () => {
+    const { variant: _variant, ...nextSelection } = selection;
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    close(true);
+  } : undefined;
+
+  const official = railInstance ? modelChoices(railInstance, railInstance.models.options.filter((option) => !option.custom)) : [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
-  const currentModel = selection.instanceId === railInstance?.instanceId ? selection.model : undefined;
+  const currentModel = selection.instanceId === railInstance?.instanceId
+    ? official.find((option) => choiceIsSelected(option, selection))?.id : undefined;
   const filteredOfficial = filterCustomModels(official, query);
   const compactOfficial = railInstance
     ? suggestedModels(official, railInstance.models.default, currentModel, COMPACT_MODEL_COUNT)
@@ -576,16 +554,16 @@ export function ModelPicker({
     : levels.length > 0 && !shown.busy ? { levels, current: selection.effort, onPick: writeEffort, onReset: () => writeEffort(undefined) }
     : null;
 
-  const botModelId = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
-    ? profile.modelSelection.model : undefined;
-  const renderRow = (option: ModelOption) => (
+  const botModelSelection = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
+    ? profile.modelSelection : undefined;
+  const renderRow = (option: ModelChoice) => (
     <ModelRow
       key={option.id}
       option={option}
-      current={selection.instanceId === railInstance?.instanceId && selection.model === option.id}
+      current={selection.instanceId === railInstance?.instanceId && choiceIsSelected(option, selection)}
       defaultId={railInstance?.models.default ?? ""}
-      botModel={option.id === botModelId}
-      onPick={() => railInstance && pick(railInstance, option.id)}
+      botModel={botModelSelection ? choiceIsSelected(option, botModelSelection) : false}
+      onPick={() => railInstance && pick(railInstance, option.nativeModel ?? option.id, option.variant)}
     />
   );
 
@@ -722,11 +700,16 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border-[0.5px] border-ink/10 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
+        contained
+          ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
+          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
     >
-      {active && <InstanceProviderMark instance={active} size={14} />}
+      {active && (contained
+        ? <InstanceProviderMark instance={active} size={14} subtle />
+        : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
@@ -749,9 +732,9 @@ export function ModelPicker({
         )}
       </span>
       <ChevronDown
-        size={14}
+        size={12}
         className={cn(
-          "text-ink-secondary transition-transform",
+          "text-ink-tertiary transition-transform",
           open && "rotate-180",
           !contained && active && "@max-4xl/chathead:hidden",
         )}
@@ -761,7 +744,10 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
+        "group flex items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
+        contained
+          ? "min-w-0 max-w-[58%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
+          : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
     >
@@ -771,7 +757,7 @@ export function ModelPicker({
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
-      <span className="max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
@@ -872,7 +858,7 @@ export function ModelPicker({
                   <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
                 )}
                 {railInstance.access === "api"
-                  ? <div className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{t("model.apiKeyHint")}</div>
+                  ? <ApiKeyHint instance={railInstance} />
                   : pane === "custom" && <div className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{t("model.localHint")}</div>}
               </div>
 
@@ -1095,6 +1081,7 @@ export function ModelPicker({
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
           onManage={openEngines}
+          onResetVariant={resetVariant}
         />
       ) : fullPane}
     </div>

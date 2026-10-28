@@ -20,6 +20,8 @@ vi.mock("@/state/store", async (importOriginal) => {
 import { BotContextMenu, BotListItem, BotThreadList, botRowProps, GroupListItem, PinnedBotCircle, type BotRowProps } from "./Sidebar";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { forgetSearchDisclosuresForTests } from "@/lib/search-disclosure";
+import { noteTurnEvent, resetTurnLive } from "@/state/turn-status";
+import type { RuntimeEvent } from "../../shared/runtime-events";
 
 const bot: Bot = {
   id: "atlas", threadId: "last-selected", name: "Atlas", title: "", description: "",
@@ -164,7 +166,7 @@ describe("bot-first sidebar", () => {
     expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bright-2 top-1 translate-y-0\b/);
   });
 
-  it("fades the collapsed rail's engine badge in Simple mode and leaves Advanced's at full strength", () => {
+  it("fades the collapsed rail's engine badge in both modes", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
     const candidate = { ...bot, tasks: [], projects: [] };
@@ -172,8 +174,7 @@ describe("bot-first sidebar", () => {
     expect(rail).toMatch(/<span data-testid="model-badge"[^>]*><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
     fixture.advanced = true;
     const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("icons", candidate)));
-    expect(advanced).toContain('data-testid="model-badge"');
-    expect(advanced).not.toContain("data-provider-mark");
+    expect(advanced).toMatch(/<span data-testid="model-badge"[^>]*><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
   });
 
   it("shows a waiting Simple row as an amber dot and preview, and a working one as a ring-cut dot on the avatar, with no badge or live region", () => {
@@ -191,14 +192,48 @@ describe("bot-first sidebar", () => {
     expect(working).toContain("[--row:var(--color-panel)]");
   });
 
-  it("rings a focused Simple row or group chat inside its edge, where Advanced keeps its accent ring", () => {
+  it.each([false, true])("says the step a working bot is on in place of its last message, and its last message again once done (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.showThreads = false;
+    resetTurnLive();
+    const said: Bot["messages"] = [{ id: "hi", role: "bot", kind: "text", at: 1, text: "Here are the leads from Monday." }];
+    const leads = { threadId: "leads", title: "Leads", createdAt: 1 };
+    const candidate: Bot = { ...bot, threadId: "leads", messages: said, unread: false, projects: [], tasks: [{ ...leads, busy: true, activity: "working" }], busy: true };
+    noteTurnEvent({ eventId: "e1", provider: "claudeAgent", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
+      type: "turn.progress", activity: "command", itemId: "c1", target: "scrape.py", quiet: { kind: "busy" } } as RuntimeEvent);
+    const working = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running scrape.py</span>');
+    expect(working, "the row's second line keeps its height: no taller dots").not.toContain("h-[1.5em]");
+    expect(working).not.toContain("Monday");
+    expect(working, "the row says the step alone, not how it is doing").not.toContain("busy, no output yet");
+    const done = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...candidate, busy: false, tasks: [{ ...leads, busy: false, activity: "idle" }] })));
+    expect(done).toContain("Here are the leads from Monday.");
+    expect(done).not.toContain("scrape.py");
+    resetTurnLive();
+  });
+
+  it("speaks for the conversation that is working when another one is open", () => {
+    fixture.advanced = true;
+    fixture.showThreads = false;
+    resetTurnLive();
+    const candidate: Bot = { ...bot, threadId: "open", messages: [], unread: false, projects: [], busy: true,
+      tasks: [{ threadId: "open", title: "Open", createdAt: 1 }, { threadId: "leads", title: "Leads", createdAt: 2, busy: true, activity: "working" }] };
+    noteTurnEvent({ eventId: "e2", provider: "codex", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
+      type: "turn.progress", activity: "web", itemId: "w1", target: "Biber Dammbau" } as RuntimeEvent);
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Biber Dammbau”</span>");
+    resetTurnLive();
+  });
+
+  it("rings a focused row or group chat inside its edge in both modes", () => {
     fixture.showThreads = false;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
     const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] }))) + renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
     expect(simple.match(/focus-visible:outline-2 focus-visible:-outline-offset-2! focus-visible:outline-focus/g)).toHaveLength(2);
     expect(simple).not.toContain("focus-visible:ring-accent/60");
     fixture.advanced = true;
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })))).toContain("outline-none focus-visible:ring-1 focus-visible:ring-accent/60");
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
+    expect(advanced).toContain("focus-visible:outline-2 focus-visible:-outline-offset-2! focus-visible:outline-focus");
+    expect(advanced).not.toContain("focus-visible:ring-accent/60");
   });
 
   it("hides even the selected Simple row's actions until hover or focus, where Advanced keeps them shown", () => {
@@ -222,7 +257,7 @@ describe("bot-first sidebar", () => {
     expect(markup).toContain('<span class="sr-only">Unread</span>');
   });
 
-  it("draws no engine mark for a bot with no AI yet, in a group chat, or in Advanced mode, where the full mark stays", () => {
+  it("draws no engine mark for a bot with no AI yet or in a group chat, and a faded one in Advanced mode", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
     const candidate = { ...bot, tasks: [], projects: [] };
@@ -231,8 +266,7 @@ describe("bot-first sidebar", () => {
     expect(renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }))).not.toContain("data-provider-mark");
     fixture.advanced = true;
     const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
-    expect(advanced).not.toContain("data-provider-mark");
-    expect(advanced).toContain('data-testid="model-badge"');
+    expect(advanced).toMatch(/data-testid="model-badge"[^>]*><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
   });
 
   it.each(["comfortable", "compact"] as const)("keeps a Simple row to its name, preview and one faded engine mark, naming role, Chief and engine in its tooltip, %s density", (density) => {

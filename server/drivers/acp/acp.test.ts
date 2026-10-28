@@ -1852,6 +1852,29 @@ describe("ACP turns (fake CLI)", () => {
     },
   );
 
+  it("sends Grok session/set_model only when the session runs another model", async () => {
+    await create(GrokAgentDriver);
+    process.env.FAKE_ACP_SESSION_MODELS = "grok-4.7|Grok 4.7,grok-4.6|Grok 4.6";
+    try {
+      const configCalls = async (threadId: string, model: string) => {
+        const dump = join(scratch, `${threadId}.json`);
+        process.env.FAKE_ACP_DUMP = dump;
+        const { turnId } = await instance.adapter.sendTurn({
+          threadId, text: "use a skill", model, approvalMode: "auto",
+          integrations: { agents: { command: "node", args: ["/fixture/agents-proxy.mjs"], env: {} } },
+        });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        return existsSync(`${dump}.config.json`) ? JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) : [];
+      };
+      expect(await configCalls("t-grok-same-model", "grok-4.7")).toEqual([]);
+      expect(await configCalls("t-grok-other-model", "grok-4.6")).toEqual([
+        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "grok-4.6" } },
+      ]);
+    } finally {
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
   it.each([
     ["ask", true, "default"],
     ["full", true, "bypassPermissions"],
@@ -2031,6 +2054,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(progress[0]).toMatchObject({ activity: "command", itemId: "tc-slow" });
     expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
     expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.completed"));
+  });
+
+  it("shows a running tool's output and names the agent process while the tool runs", async () => {
+    const gate = join(scratch, "slow-tool-done");
+    Object.assign(process.env, { FAKE_ACP_TOOL_GATE: gate, FAKE_ACP_TOOL_OUTPUT: "Collecting 12 items\npage 3 of 40" });
+    try {
+      await create(QwenAgentDriver, "slow-tool");
+      await instance.adapter.sendTurn({ threadId: "t-slow-output", text: "go" });
+      expect(await recorder.until(e => e.type === "item.output")).toMatchObject({ itemId: "tc-slow", text: "Collecting 12 items\npage 3 of 40", whole: true });
+      const pid = instance.adapter.enginePid?.("t-slow-output");
+      expect(pid).toEqual(expect.any(Number));
+      expect(() => process.kill(pid!, 0)).not.toThrow();
+      writeFileSync(gate, "done");
+      await recorder.until(e => e.type === "turn.completed");
+      expect(instance.adapter.enginePid?.("t-slow-output")).toBeUndefined();
+    } finally {
+      delete process.env.FAKE_ACP_TOOL_GATE;
+      delete process.env.FAKE_ACP_TOOL_OUTPUT;
+    }
   });
 
   it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {

@@ -130,7 +130,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
   });
 
-  it("fades the list's edges, with the top buttons and the tiles fixed above it, and keeps Advanced's glass", () => {
+  it("fades the list's edges in both modes, with the top buttons and the tiles fixed above it", () => {
     fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea")] };
     const simple = render();
     expect(simple.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
@@ -141,8 +141,8 @@ describe("Simple-mode sidebar layout", () => {
     expect(simple.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
     fixture.advanced = true;
     const advanced = render();
-    expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(false);
-    expect(advanced.root.props.className).not.toContain("--scroll-fade-surface");
+    expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
+    expect(advanced.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
   });
 
   it("keeps Advanced's Pinned heading and rows, with the Chief as a row", () => {
@@ -157,7 +157,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(headers(tree).map((header) => header.props.name)).toContain("Pinned");
   });
 
-  it("draws a faint edge and the Simple footer in Simple mode, and keeps Advanced's divider and footer", () => {
+  it("draws the same faint edge in both modes, with the Simple footer in Simple mode and Advanced's footer in Advanced", () => {
     const footer = (tree: ReactElement<Props>[]) => (tree.find((node) => node.type === SidebarFooter)!.props as Parameters<typeof SidebarFooter>[0]).simple;
     const simple = render();
     expect(simple.root.props.className).toContain("border-r border-ink/[0.04]");
@@ -166,7 +166,7 @@ describe("Simple-mode sidebar layout", () => {
     fixture.values = [];
     fixture.advanced = true;
     const advanced = render();
-    expect(advanced.root.props.className).toContain("border-r border-hairline/40");
+    expect(advanced.root.props.className).toContain("border-r border-ink/[0.04]");
     expect(footer(advanced.tree)).toBe(false);
   });
 
@@ -312,6 +312,22 @@ describe("Simple-mode sidebar layout", () => {
     (render().tree.find((node) => node.type === SidebarEdgeToggle)!.props as Parameters<typeof SidebarEdgeToggle>[0]).onToggle();
     expect(fixture.storage.get(SIDEBAR_DENSITY_KEY)).toBe("comfortable");
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
+  });
+
+  it("marks a Cloud's own sidebar for its night sky, Simple, Advanced or as a rail, and never a local one", () => {
+    const sky = () => render().root.props["data-cloud-sky"];
+    expect(sky(), "a local workspace").toBeUndefined();
+    fixture.state = { ...fixture.state, config: { ...fixture.state.config, cloudHome: false } as AppState["config"] };
+    expect(sky(), "a server that is no Cloud").toBeUndefined();
+    fixture.state = { ...fixture.state, config: { ...fixture.state.config, cloudHome: true } as AppState["config"] };
+    expect(sky()).toBe("simple");
+    fixture.advanced = true;
+    expect(sky()).toBe("advanced");
+    setSidebarDensity("icons");
+    expect(sky(), "Advanced collapsed to avatars").toBe("rail");
+    fixture.advanced = false;
+    expect(sky(), "Simple's rail").toBe("rail");
+    expect(render(true).root.props["data-cloud-sky"], "held collapsed by a side panel").toBe("rail");
   });
 
   it("New Bot makes a bot at once in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {

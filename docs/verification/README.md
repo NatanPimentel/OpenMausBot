@@ -112,6 +112,11 @@ creating, switching between and recovering named local environments by hand on
 a packaged desktop install; the control surface cannot drive it, so it is not
 in the map above.
 
+The [talk shortcut recipe](talk-shortcut.md) checks hold-to-talk from any app, the
+reply box and the Quick asks chat by hand on a packaged side-by-side build; the
+control surface cannot drive a global shortcut or the microphone, so it is not
+in the map above.
+
 The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
 Cloud home with the desktop's own wiring between them, and runs and checks the
 one-time move as main does.
@@ -145,6 +150,10 @@ Admin server, including cancellation, revocation and unchanged normal startup.
 
 The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
+
+The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
+pages may read the rail, opening a place by its id, and buying another Cloud,
+with a loopback Admin and the real app in a disposable preview.
 
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
@@ -226,6 +235,10 @@ per-thread models, simultaneous direct conversations and thread-scoped Stop.
 The [custom ACP model fixture](custom-acp-models.md) checks native model and
 thinking choices, independent bot defaults and thread overrides, and retained
 settings and catalogs after restart with an offline ACP engine.
+
+The [GitHub Copilot engine checks](copilot-engine.md) cover its ACP catalog,
+model and effort selection, sign-in detection, and moving a bot or conversation
+between Claude, Copilot and a custom ACP agent with fake engines.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.

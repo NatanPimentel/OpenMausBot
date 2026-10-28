@@ -20,7 +20,7 @@ import { runAcpOneShot } from "./background-text.ts";
 import { sanitizeAcpToolMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
-  classifyQuiet, DEFAULT_QUIET_NOTICE_MS, describeQuiet, formatQuietLimit, lastSeenPhrase, LogTail, promptIdleTimeoutMs, quietKey, sampleProcessTree,
+  classifyQuiet, describeQuiet, formatQuietLimit, lastSeenPhrase, LogTail, promptIdleTimeoutMs, quietKey, quietNoticeMs, quietTickMs, sampleProcessTree,
   type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
 import { readSessionReport } from "./session-reports.ts";
@@ -59,13 +59,13 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
-import type { AcpAskFinish, AcpSession, AcpTurn } from "./turn-state.ts";
+import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { engineFailureKind, engineFailureMessage, stopCause } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpToolProgress } from "../tool-progress.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
@@ -188,10 +188,12 @@ export interface AcpSupport {
   /** Do not retain stderr from providers that may place OAuth material there. */
   redactStderr?: boolean;
   /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
-   * picks what to tell the person. Null when this process keeps none. */
+   * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
+   * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
   statusLog?: {
     path(env: Record<string, string | undefined>, sessionId: string): string | null;
-    parse(line: string): LogSignal | null;
+    parse(line: string, sessionId: string): LogSignal | null;
+    shared?: true;
   };
   /** Bound provider-native tool payloads before writing diagnostic logs. */
   sanitizeToolPayload?: boolean;
@@ -258,14 +260,6 @@ const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
 /** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
-/** A `tool_call` without a status is pending (ACP's default); a `tool_call_update` without one leaves the call as it was. */
-function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; status?: unknown }, defaultStatus?: "pending"): void {
-  if (typeof update.toolCallId !== "string" || !update.toolCallId) return;
-  const status = update.status ?? defaultStatus;
-  if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
-  else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
-}
-
 function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
   const reply = streamed.trim();
   const replay = chunk.trim();
@@ -526,11 +520,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       });
 
       const startQuietWatch = (threadId: string, session: AcpSession, current: AcpTurn) => {
-        const noticeAfterMs = envOr("OMB_ACP_QUIET_NOTICE_MS", DEFAULT_QUIET_NOTICE_MS);
-        const tickMs = envOr("OMB_ACP_QUIET_TICK_MS", 15_000);
-        const logPath = support.statusLog && session.sessionId
-          ? support.statusLog.path(session.env, session.sessionId)
-          : null;
+        const noticeAfterMs = quietNoticeMs();
+        const tickMs = quietTickMs();
+        const { sessionId } = session;
+        const logPath = support.statusLog && sessionId ? support.statusLog.path(session.env, sessionId) : null;
         const tail = logPath ? new LogTail(logPath) : null;
         tail?.read();
         let logged: { signal: LogSignal; at: number } | null = null;
@@ -543,18 +536,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let probing = false;
         let state: QuietState | null = null;
         const promptStartedAt = Date.now();
+        let readAt = promptStartedAt;
         const tick = async () => {
           if (probing || current.state.settled || session.current !== current) return;
           const now = Date.now();
           for (const line of tail?.read() ?? []) {
-            session.acp.touch();
-            const signal = support.statusLog!.parse(line);
+            if (!support.statusLog!.shared) session.acp.touch();
+            const signal = support.statusLog!.parse(line, sessionId!);
             if (signal?.kind === "context") context = { tokens: signal.tokens, threshold: signal.threshold };
-            else if (signal) logged = { signal, at: now };
+            // A shared row was written some time after the last read; date it then, so a reply since clears it.
+            else if (signal) logged = { signal, at: support.statusLog!.shared ? readAt : now };
           }
+          readAt = now;
           const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
           if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
-            if (quietMs < noticeAfterMs) logged = null;
+            if (quietMs < noticeAfterMs && (!support.statusLog?.shared || session.acp.lastInboundAt > (logged?.at ?? 0))) logged = null;
             previous = null;
             shownKey = null;
             noSignsSince = null;
@@ -972,7 +968,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
           }
           // A call still running (its kind, file and diff so far) feeds the chat's status line.
-          const draft = acpToolProgress(u); if (draft) emit({ ...base(threadId, current.turnId), ...draft });
+          for (const live of [acpToolProgress(u), acpToolOutput(u)]) if (live) emit({ ...base(threadId, current.turnId), ...live });
         };
 
         const session: AcpSession = {
@@ -1743,6 +1739,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return finish(decision.behavior, "user", decision.message, decision.always === true);
           },
           hasSession: (threadId) => active.has(threadId),
+          enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
           stopAll: async () => {
             for (const { stop } of active.values()) stop();
             for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
