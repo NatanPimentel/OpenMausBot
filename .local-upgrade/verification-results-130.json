@@ -1,0 +1,8 @@
+{
+ "catalog-compat": {"exit": 0, "note": "catalogo/bridge/policy do porte 0.1.130 passam (goldens regenerados); ferramentas nossas mantidas"},
+ "server-typecheck-build": {"exit": 0, "onde": "vps3"},
+ "server-bundle": {"exit": 0, "onde": "vps3"},
+ "packaged-server-smoke": {"exit": 0, "onde": "vps3"},
+ "ui-build": {"exit": 0, "onde": "vps3"},
+  "full-vitest-vps3": {"exit": 0, "onde": "vps3", "nota": "Node 26.7: falhas do mod = falhas do v0.1.130 puro (ambiente); os 4 testes de Precisa de voce adaptados passam (40 testes)"}
+}
