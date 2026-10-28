@@ -417,4 +417,11 @@ describe("plan usage fetcher", () => {
       { id: "grok", name: "Grok", driver: "grok", environment: { GROK_HOME: "/tmp/grok" } },
     ]);
   });
+
+  it("skips API-key instances, which have no plan window", () => {
+    expect(planAccountsFromInstances({
+      claude: { driver: "claudeAgent" },
+      claudeApi: { driver: "claudeAgent", access: "api", environment: { ANTHROPIC_API_KEY: "x" } },
+    }).map((a) => a.id)).toEqual(["claude"]);
+  });
 });

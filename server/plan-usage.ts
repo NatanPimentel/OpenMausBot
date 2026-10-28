@@ -136,6 +136,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
   for (const [id, entry] of Object.entries(instances)) {
     const driver = DRIVER_OF[entry.driver];
     if (!driver) continue;
+    if (entry.access === "api") continue; // chave de API não tem janela de plano; sem configDir lia a conta padrão (Dr. Eggbot, 28/10)
     const config = asRecord(entry.config);
     const configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
     accounts.push({
