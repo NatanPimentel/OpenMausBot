@@ -275,7 +275,7 @@ describe("find_tool", () => {
 
   it.each([
     ["delete a teammate", "propose_bot_deletion"],
-    ["pause or delete one of my routines", "manage_trigger"],
+    ["pause or delete one of my routines", "delete_trigger"],
   ])("still finds the upstream tool beside the shared data tools: %s", async (query, expected) => {
     expect((await found(bridgeFor(FULL_CHIEF), query)).matches.map(match => match.name)).toContain(expected);
   });
