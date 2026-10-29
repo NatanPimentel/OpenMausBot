@@ -28,6 +28,7 @@ import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./ro
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 import { cloneAttachments } from "./routine-attachments.ts";
+import { fieldsRestorer } from "./routine-restore.ts";
 import { loadInstalledPackage, loadRoutine, loadRun } from "./routine-load.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
@@ -1104,8 +1105,7 @@ export class RoutineManager {
         if (definition?.schedule.type === "interval") {
           const latest = latestIntervalOccurrence(definition.schedule, now);
           if (latest !== null && latest > run.scheduledFor) {
-            run.scheduledFor = latest;
-            this.save();
+            this.saveRun(run, { scheduledFor: latest });
             this.emitRun(run);
           }
           const requiresCurrentDayOccurrence =
@@ -1129,13 +1129,11 @@ export class RoutineManager {
         const state = sameRoutineWorking ? "busy" : this.targetState(run);
         if (state === "busy") {
           if (run.deferredAt == null) {
-            run.deferredAt = now;
-            this.save();
+            this.saveRun(run, { deferredAt: now });
             this.emitRun(run);
           }
-          if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
-            run.deferredNoticeAt = now;
-            this.save();
+          if (run.deferredNoticeAt == null && !run.checkKey && now - run.deferredAt! >= ROUTINE_DEFERRAL_NOTICE_MS) {
+            this.saveRun(run, { deferredNoticeAt: now });
             this.emitRun(run);
             this.options.onRunDeferred?.(cloneRun(run));
           }
@@ -1262,6 +1260,7 @@ export class RoutineManager {
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
     if (!run || (run.target === "bot" && run.status === "waiting" && !run.asked && this.options.routineTurn?.(event.threadId) === false)) return null;
+    const undo = this.undoFor(run);
     if (event.type === "turn.started" || event.type === "turn.completed") settleAsk(run, undefined, this.now());
     // A room goal's orchestrator owns its result (finishGoalRun); a member's completion is intermediate.
     if (
@@ -1281,7 +1280,7 @@ export class RoutineManager {
     } else if (event.type === "request.resolved") {
       const unanswered = settleAsk(run, event, this.now());
       if (unanswered) {
-        void this.stopRun(run, unanswered, "stopped");
+        this.stopRun(run, unanswered, "stopped", undo).catch((error) => console.error("routines: could not stop a run nobody answered", error));
         return cloneRun(run);
       }
       run.status = "running";
@@ -1297,7 +1296,7 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
-        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason });
+        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason }, undo);
         return cloneRun(run);
       }
       this.failureFacts.delete(run.id);
@@ -1311,7 +1310,7 @@ export class RoutineManager {
     } else {
       return null;
     }
-    this.save();
+    this.saveRun(run, {}, undo);
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
@@ -1328,15 +1327,15 @@ export class RoutineManager {
     if (run) this.settleFailure(run, message, facts);
   }
 
-  private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts) {
+  private settleFailure(run: RoutineRun, failure: string, facts: RoutineFailureFacts, undo = this.undoFor(run)) {
     this.failureFacts.delete(run.id);
     this.noUpdateRuns.delete(run.id);
     if (this.closing) return;
     const backupReady = facts.limitResetsAt !== undefined && this.options.limitBackup?.(run.botId) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
-    if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert);
+    if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert, undo);
     else {
-      this.save();
+      this.saveRun(run, {}, undo);
       this.emitRun(run);
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
@@ -1351,25 +1350,18 @@ export class RoutineManager {
     );
     if (!run || status === "working") return null;
     const safeDetail = redactSecretsInText(detail).trim();
+    const undo = this.undoFor(run);
     run.goalStatus = status;
     if (status === "failed" || status === "blocked" || status === "limit-reached") {
-      this.failRun(
-        run,
-        safeDetail ||
-          (status === "limit-reached" ? "The room goal reached its turn limit" : "The room goal is blocked"),
-      );
+      const why = status === "limit-reached" ? "The room goal reached its turn limit" : "The room goal is blocked";
+      this.failRun(run, safeDetail || why, "failed", undefined, undo);
     } else if (status === "needs-input" || status === "paused") {
       this.wait(run, safeDetail.slice(0, 500) || (status === "paused" ? "The room goal is paused" : "The team needs your input"));
-      run.error = undefined;
-      this.save();
+      this.saveRun(run, { error: undefined }, undo);
       this.emitRun(run);
     } else {
-      run.status = status === "stopped" ? "cancelled" : "completed";
-      run.attention = undefined;
-      run.finishedAt = this.now();
-      run.error = undefined;
-      if (status !== "stopped") run.output = safeDetail.slice(0, 2_000) || undefined;
-      this.save();
+      const output = status === "stopped" ? {} : { output: safeDetail.slice(0, 2_000) || undefined };
+      this.saveRun(run, { status: status === "stopped" ? "cancelled" : "completed", attention: undefined, finishedAt: this.now(), error: undefined, ...output }, undo);
       this.emitRun(run);
     }
     queueMicrotask(() => this.tickInBackground());
@@ -1383,23 +1375,30 @@ export class RoutineManager {
     run.attention = attention;
   }
 
-  private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
+  private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached", undo = this.undoFor(run)) {
     if (run.target === "room-goal") run.goalStatus = status;
-    this.failRun(run, detail);
+    this.failRun(run, detail, "failed", undefined, undo);
     if (!run.threadId) return;
     if (run.target === "room-goal") await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
     else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 
-  private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
-    run.status = status;
-    run.attention = undefined;
-    run.error = redactSecretsInText(message).slice(0, 500);
-    run.finishedAt = this.now();
-    this.save();
+  private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null, undo = this.undoFor(run)) {
+    this.saveRun(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() }, undo);
     this.emitRun(run);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
     this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
+  }
+
+  private saveRun(run: RoutineRun, change: Partial<RoutineRun>, undo = this.undoFor(run)) {
+    const runs = this.runs.slice();
+    Object.assign(run, change);
+    try { this.save(); } catch (error) { this.runs = runs; undo(); throw error; }
+  }
+
+  private undoFor(run: RoutineRun): () => void {
+    const notices = this.ownerNotices.slice(), fields = fieldsRestorer(run);
+    return () => { this.ownerNotices = notices; fields(); };
   }
 
   private advancePastOccurrence(routine: Routine, now: number, occurrence: number) {
