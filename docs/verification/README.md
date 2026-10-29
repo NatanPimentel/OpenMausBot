@@ -72,6 +72,7 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
+- [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
 - [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)
@@ -128,6 +129,12 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
+category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
+bot's turn getting the `postiz` tools with the token kept out of every answer,
+transcript and log, plain refusals, revocation and disconnect, against loopback
+stand-ins for Postiz.
 
 The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
 included calls with the month's use, the person's own treg key (saved, tested,
