@@ -249,6 +249,16 @@ describe("needs you", () => {
     expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
   });
 
+  it("local mod: lists a bot's question by its own words, not by the card's \"Your bot has a question\" title", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const card = { title: "Your bot has a question", subtitle: "Natan, você libera o PR #1810 do OS?", options: [], requestType: "question" as const, requestId: "q4" };
+    const asked = w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3), card });
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: asked.id, at: at(12, 3), botId: mia.id, threadId: mia.threadId, text: "Natan, você libera o PR #1810 do OS?" },
+    ]);
+  });
+
   it("local mod: lists a widget card that asks something until it is sent back", () => {
     const w = world();
     const mia = w.store.createBot({ name: "Mia" });

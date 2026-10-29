@@ -193,6 +193,10 @@ it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, c
   expect(work).not.toBe(f.mira.activeTaskId);
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
   expect((await f.chips(job, "needs your input")).some((message: any) => chipText(message).includes("which repository?"))).toBe(true);
+  // Local mod (29/10/2026): the person hears her question as a question, in her words, not as "resumed with results".
+  const asked = async () => ((await f.api("GET", "/api/notifications")).body.notifications as any[]).filter((entry) => entry.botId === f.mira.id && entry.threadId === work);
+  await expect.poll(async () => (await asked()).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+  expect((await asked())[0]).toMatchObject({ kind: "question", title: "Mira has a question", body: "which repository?" });
   await expect.poll(async () => await f.said(job, "C-ASKED: Mira needs the repository.") === 1 && f.roots()[0]?.status === "waiting", { timeout: 30_000 }).toBe(true);
   const chiefTurns = () => (f.turns(f.clive.id) as Array<{ planKey?: string; resumed?: boolean }>).map((record) => [record.planKey, record.resumed]);
   expect(chiefTurns()).toEqual([["C0", false], ["C-ASKED", false]]);

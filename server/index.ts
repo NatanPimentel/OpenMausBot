@@ -4177,7 +4177,7 @@ const coordinator: Coordinator = createCoordinator({
       }
       if (node.groupId) store.patchGroup(node.groupId, { unread: true });
       else store.patchTask(bot.id, node.threadId, { unread: true });
-      notify(buildNotification("delegation-settled", bot, node.threadId, question, { avatarUrl: bot.avatarUrl }));
+      notify(buildNotification("question", bot, node.threadId, question, { avatarUrl: bot.avatarUrl })); // Local mod (29/10/2026): it asks, not "resumed with results".
     },
     levelOf: (target, source) => delegatedLevel.levelOf(target, source),
     chiefOf: address => chiefLevel(store.bot(address.botId)),

@@ -2,6 +2,7 @@
 // and the time it saved, computed on each read from the transcript rows and
 // routine runs the server already keeps.
 import { isPersistentQuestionCard, type QuestionRequestCardData } from "../shared/ask-question.ts";
+import { questionCardText } from "../shared/question-text.ts";
 import type { TurnDigest } from "../shared/digest.ts";
 import { isClientCancellation } from "../shared/client-cancel.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
@@ -119,7 +120,8 @@ function approvalText(card: QuestionCard & { tool?: string }): string {
 }
 
 function questionText(card: QuestionCard): string {
-  return plainTitle(card.questionRequest?.questions?.[0]?.question || card.title || card.subtitle || "");
+  // Local mod (Imobiturbo, 29/10/2026): the question itself, never only "Your bot has a question".
+  return plainTitle(questionCardText(card) || card.title || card.subtitle || "");
 }
 
 export function todayReport(sources: TodaySources, viewer: TodayViewer, requestedSince: number, now = Date.now()): TodayReport {

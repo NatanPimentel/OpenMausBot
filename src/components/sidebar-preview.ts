@@ -10,14 +10,26 @@ import { citationPreviewText } from "@/lib/citations";
 import { plainPreviewText } from "@/lib/plain-preview";
 import { isClientCancellation, isStoppedTurnName } from "../../shared/client-cancel";
 import { roomWorkingPreview } from "@/lib/room-threads";
+import { liveCardKind } from "../../shared/live-approval";
+import { needsInputQuestion, questionCardText } from "../../shared/question-text";
 
 /** The newest message a preview can show. A receipt or a screen frame says nothing about the conversation on its own. */
 export function lastPreviewable<T extends { kind: string }>(messages: readonly T[] | undefined): T | undefined {
   return messages?.findLast((message) => !isReceipt(message) && message.kind !== "screen");
 }
 
+/** Local mod (Imobiturbo, 29/10/2026): a bot waiting on the person shows what it asks, not only that it waits. */
+export function waitingPreview(visible: readonly Message[]): string {
+  const open = visible.findLast((message) => message.kind === "options" && liveCardKind(message.card) === "question");
+  const asked = questionCardText(open?.card);
+  return asked ? plainPreviewText(asked) : t("sidebar.preview.waiting");
+}
+
+/** Local mod (Imobiturbo, 29/10/2026): a reply ending on a NEEDS INPUT line previews as its question. */
+const askedOrSaid = (text: string): string => needsInputQuestion(text) ?? text;
+
 export function botPreview(bot: Bot, visible: Message[], instances: InstanceInfo[], advanced: boolean): string {
-  if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
+  if (bot.activity === "waiting-on-you") return waitingPreview(visible);
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
   return lastLine(bot, visible, instances, advanced);
@@ -47,15 +59,17 @@ export function lastLine(bot: Bot, visible: Message[], instances: InstanceInfo[]
   if (last.kind === "options" && last.card) {
     // MausBot's intro by its first line, as each mode's intro says it.
     if (last.helperIntro) return t(advanced ? "helperIntro.title" : bot.chiefOfStaff ? "helperIntro.hello" : "helperIntro.hi.helper", { name: bot.name });
+    const asked = questionCardText(last.card);
+    if (asked) return plainPreviewText(asked);
     return (last.card.requestId && last.card.tool && !last.card.questionRequest && approvalCardOutcome(last.card)) || last.card.title;
   }
   if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult, advanced);
   if (last.kind === "connector" && last.connector) return sidebarConnectorPreview(last.connector, t);
   if (last.kind === "routine.run" && last.routineRun) return automationRunPreview(last.routineRun);
   const peer = peerLine(last);
-  if (peer) return `${peer.name}: ${plainPreviewText(peer.body)}`;
+  if (peer) return `${peer.name}: ${plainPreviewText(askedOrSaid(peer.body))}`;
   if (last.role !== "user" && isClientCancellation(last.text ?? "")) return t("chat.turnStopped");
-  return plainPreviewText(citationPreviewText(last.text ?? ""));
+  return plainPreviewText(citationPreviewText(last.role === "user" ? last.text ?? "" : askedOrSaid(last.text ?? "")));
 }
 
 const RUN_PREVIEW = {

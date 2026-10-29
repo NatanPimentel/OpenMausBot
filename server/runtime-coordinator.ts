@@ -8,6 +8,9 @@ import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolve
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+// Local mod: the NEEDS INPUT parser is shared, so the app's previews read the same question the coordinator parks on.
+import { needsInputQuestion } from "../shared/question-text.ts";
+export { needsInputQuestion };
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -20,7 +23,6 @@ const NO_TURN = "The requesting turn has no root (no turn)";
 
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
-const NEEDS_INPUT = /^needs input:/i;
 
 /** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
 const TURN_STALL_MS = 24 * 60 * 60_000;
@@ -57,20 +59,6 @@ function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Ori
     ? { kind: "person", source: "chat", ref: source.threadId, quote: origin.request }
     : { kind: "outside", source: "chat", ref: source.threadId };
 }
-
-export function needsInputQuestion(text: string): string | undefined {
-  const lines = text.split(/\r?\n/);
-  let last = lines.length - 1;
-  while (last >= 0 && lines[last]!.trim() === "") last -= 1;
-  if (last < 0) return undefined;
-  const line = lines[last]!.trim();
-  if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
-  // Local patch: "NEEDS INPUT: nenhum." is a bot saying it needs nothing, not a question.
-  if (NEEDS_INPUT_NONE.test(question) && !question.includes("?")) return undefined;
-  return question || undefined;
-}
-const NEEDS_INPUT_NONE = /^(?:nenhum|nenhuma|nada|none|nothing|n\/a|-+|\u2014|\u2013)(?=[\s.,;:!]|$)/i;
 
 export function view(a: Assignment, parent?: Assignment): HandoffView {
   const groupId = a.assignee.destination.groupId;

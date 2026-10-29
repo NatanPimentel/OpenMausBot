@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
-import { botPreview, groupPreview, lastPreviewable } from "./sidebar-preview";
+import { botPreview, groupPreview, lastLine, lastPreviewable, waitingPreview } from "./sidebar-preview";
+import { t } from "@/lib/i18n";
 
 let at = 0;
 const message = (fields: Partial<Message>): Message => ({ id: `m${++at}`, at, role: "bot", kind: "text", ...fields }) as Message;
@@ -53,5 +54,31 @@ describe("sidebar previews", () => {
   it("skips screen frames in a group chat's preview too", () => {
     const group = { id: "g", name: "Room", messages: [message({ text: "Done.", from: { botId: "ada", name: "Ada", color: "green" } }), screen()] } as unknown as Group;
     expect(groupPreview(group, [bot], [], false)).toBe("Ada: Done.");
+  });
+});
+
+// Local mod (Imobiturbo, 29/10/2026): a question for the person reads as the question wherever the conversation is summed up.
+describe("a bot's question in the preview", () => {
+  const asks = (fields: Record<string, unknown> = {}) => message({ kind: "options", card: { title: "Your bot has a question", subtitle: "Natan, você libera o PR #1810 do OS?", options: [], requestId: "q1", requestType: "question", ...fields } } as unknown as Partial<Message>);
+
+  it("shows the question a card asks, not \"Your bot has a question\"", () => {
+    const visible = [message({ role: "user", text: "Fecha o #1810" }), asks()];
+    expect(botPreview(bot, visible, [], false)).toBe("Natan, você libera o PR #1810 do OS?");
+    expect(botPreview(bot, visible, [], true)).toBe("Natan, você libera o PR #1810 do OS?");
+    expect(lastLine(bot, visible, [], false)).not.toContain("Your bot has a question");
+  });
+
+  it("shows what a waiting bot asks, and only says it waits when there is no open question to show", () => {
+    const waiting = { ...bot, activity: "waiting-on-you" } as Bot;
+    expect(botPreview(waiting, [asks()], [], false)).toBe("Natan, você libera o PR #1810 do OS?");
+    expect(waitingPreview([asks()])).toBe("Natan, você libera o PR #1810 do OS?");
+    expect(waitingPreview([asks({ answered: "Sim" })])).toBe(t("sidebar.preview.waiting"));
+    expect(waitingPreview([])).toBe(t("sidebar.preview.waiting"));
+  });
+
+  it("shows the question a reply ends with on a NEEDS INPUT line, not the start of the reply", () => {
+    const reply = message({ text: "1. Causa: as 140 chaves de IA copiadas nas orgs.\n2. Feito na VPS4.\n\nNEEDS INPUT: Natan, você libera o PR #1810 do OS?" });
+    expect(botPreview(bot, [message({ role: "user", text: "Status?" }), reply], [], false)).toBe("Natan, você libera o PR #1810 do OS?");
+    expect(botPreview(bot, [message({ text: "Feito.\nNEEDS INPUT: nenhum." })], [], false)).toMatch(/^Feito\./);
   });
 });
