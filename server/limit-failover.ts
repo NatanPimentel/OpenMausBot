@@ -26,11 +26,17 @@ export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<Ins
   fromConfig?: Pick<InstanceConfig, "config">): boolean {
   if (to.instanceId === from.instanceId) return false;
   if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind)) return true;
-  if (toConfig?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(toConfig?.environment?.[key]?.trim()))) return true;
+  if (billsEachUse(toConfig)) return true;
   if (process.env.OMB_CLAUDE_ACCOUNT_FAILOVER !== "1" || from.driverKind !== "claudeAgent") return false;
   const fromProfile = configuredClaudeProfile(fromConfig?.config);
   const toProfile = configuredClaudeProfile(toConfig?.config);
   return fromProfile !== null && toProfile !== null && fromProfile !== toProfile;
+}
+
+/** An engine instance that bills each use (a pay-per-use key, as its access or in its environment) instead of drawing on
+ * a plan's limit. */
+export function billsEachUse(config?: Pick<InstanceConfig, "environment" | "access">): boolean {
+  return config?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(config?.environment?.[key]?.trim()));
 }
 
 export function resetClock(at: number, timeZone = hostTimeZone()): string {

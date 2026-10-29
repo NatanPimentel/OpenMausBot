@@ -135,7 +135,7 @@ function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
     </div>
     <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
     <div className="px-2 pb-1.5 pt-0.5">
-      <SwatchRadios value={pending ?? paint.swatch} onChange={choose} label={t("placeLook.aria", { name })} disabled={Boolean(paint.locked)} />
+      <SwatchRadios value={pending ?? paint.swatch} onChange={choose} label={t("placeLook.aria", { name })} disabled={Boolean(paint.locked)} offset="menu" none />
     </div>
     {note && <p data-rail-menu-note className="px-2 pb-1 text-[12px] text-ink-secondary">{note}</p>}
     {outcome === "failed" && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
@@ -204,7 +204,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const shown = shownPlaces(state.places);
-  const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair;
+  const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair || state.add.organization === true;
   // The menu opens next to the circle or row it was asked from (measured now, while that row is there), within the rail.
   const openMenu = ({ place, from }: MenuAt) => {
     const nav = navRef.current;

@@ -8,8 +8,8 @@ const INDEX = readFileSync(new URL("../../server/index.ts", import.meta.url), "u
 
 const EXACT: Record<string, number> = {
   // Internal harness routes have no server/routes module yet; moving them out is the follow-up that lowers this.
-  'path === "/': 93, // 92 upstream + 1 local route (Imobiturbo mod: openbot-data / routine-no-update internal routes)
-  "path.match(": 26,
+  'path === "/': 92, // 91 upstream + 1 local route (Imobiturbo mod: openbot-data / routine-no-update internal routes)
+  "path.match(": 24,
   "path.startsWith(": 6,
   ".exec(path)": 1,
   ".test(path)": 0,

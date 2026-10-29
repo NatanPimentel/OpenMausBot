@@ -262,7 +262,7 @@ export interface RoutineManagerOptions {
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
   limitResetAt?: (engine: string) => number | null;
   /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run. */
-  limitBackup?: (botId: string) => boolean;
+  limitBackup?: (botId: string, scope?: "engine" | "model" | "credits") => boolean;
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
   launchId?: string;
@@ -1331,7 +1331,7 @@ export class RoutineManager {
     this.failureFacts.delete(run.id);
     this.noUpdateRuns.delete(run.id);
     if (this.closing) return;
-    const backupReady = facts.limitResetsAt !== undefined && this.options.limitBackup?.(run.botId) === true;
+    const backupReady = (facts.limit !== undefined || facts.limitResetsAt !== undefined) && this.options.limitBackup?.(run.botId, facts.limit) === true;
     const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(run, recovery.error, "failed", recovery.alert, undo);
     else {

@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { createOpenBotDataHost, openBotDataErrorStatus } from "./openbot-data/host.ts";
 import { OpenBotDataError } from "./openbot-data/store.ts";
 import { OPENBOT_DATA_INTERNAL_PATH } from "./drivers/agents-openbot-data.ts";
@@ -44,20 +44,12 @@ import {
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
-import {
-  CREDENTIAL_TARGETS,
-  credentialResumeOutcome,
-  credentialIsConfigured,
-  isPendingCredentialRequest,
-  isCredentialTargetId,
-  type CredentialTargetId,
-} from "../shared/credential-request.ts";
 import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
@@ -186,7 +178,6 @@ import {
   type AppConfig,
   vpsSshAlias,
   DATA_DIR, EVENTS_DIR,
-  customMcpServers,
   onConfigSaved,
   CLAUDE_API_INSTANCE,
   openCodeProviderKeys,
@@ -208,7 +199,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { cliProbeEnvironment, testCliBinary } from "./cli-probe.ts";
-import { buildMentionNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
+import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -221,10 +212,10 @@ import {
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { recoveryCapabilityError } from "./automatic-recovery.ts";
-import { createQuotaSwitchHost } from "./host/quota-switch.ts";
+import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
+import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createLimitTakeover } from "./host/limit-takeover.ts";
 import {
-  addDisabledMcpServer,
   isRemoteMcpServer,
   listMcpServers,
   parseStoredMcpServer,
@@ -436,7 +427,7 @@ import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts";
 import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
-import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
+import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
@@ -576,18 +567,10 @@ import {
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts";
-import {
-  PHONE_SECRET_PROTOCOL_VERSION,
-  PhoneSecretBridge,
-  PhoneSecretError,
-  PhoneSecretSubmissionRegistry,
-  assertPhoneSecretRequestMatches,
-  phoneSecretOperationId,
-  type PhoneSecretContext,
-} from "./phone-secret.ts";
+import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret.ts";
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
-import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
+import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -1421,7 +1404,7 @@ function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported 
   }
 }
 
-const providerAuthSessions = new ProviderAuthSessions();
+const providerAuthSessions = new ProviderAuthSessions(); const mcpServersHost = createMcpServersHost({ dataDir: DATA_DIR, cfg: () => cfg, persist: persistMcpServers, bots: () => store.bots, policy: (servers) => managedPolicy.filterMcp(servers), tell: (text, about) => notify(buildNoticeNotification(about, store.bot(about.id)?.threadId ?? "", text)), startsServers: (botId) => { const bot = store.bot(botId); return Boolean(bot && registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.customMcp === true); }, boxed: () => botBox.enabled() });
 const mcpOAuth = new McpOAuthManager({
   file: join(DATA_DIR, "mcp-oauth.json"),
   isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner),
@@ -1436,7 +1419,7 @@ const mcpOAuth = new McpOAuthManager({
 const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
   requester: (threadId, generation) => { const owner = directRequestOwners.get(threadId); return provenRequestPerson(owner, generation ?? owner?.generation ?? "", (id) => linePersonKey(store.messagesFor(threadId).find((message) => message.id === id))); },
   mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isSessionLive: (id) => sessions.isLive(id),
-  botMcp: (bot) => managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps();
+  botMcp: (bot) => mcpServersHost.mounted(bot), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps();
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from its environment. Wired before the first catalog probe below.
 let openCodeOrganisationManaged = (): boolean => false;
 const openCodeKeysAllowed = (): boolean => openCodeProviderKeysAllowed({
@@ -1858,16 +1841,6 @@ function internalCapabilityIsActive(capability: InternalCapability): boolean {
 }
 const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
-const phoneSecretEnvelopeSchema = z.object({
-  version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
-  threadId: z.string().regex(/^[\w-]{1,128}$/),
-  keyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
-  deviceId: z.string().regex(/^[\w-]{1,128}$/),
-  target: z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,63}$/),
-  requestKey: z.string().regex(/^[\w-]{1,128}$/),
-  encapsulatedKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
-  ciphertext: z.string().regex(/^[A-Za-z0-9_-]{23,5483}$/),
-}).strict();
 const phoneProxyPath = SPAWNED_PROXIES.phone;
 
 function agentsIntegration(
@@ -1904,14 +1877,14 @@ function agentsIntegration(
       OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
       // Only advertises the tools; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
-      OMB_CLOUD_HOME: CLOUD_HOME ? "1" : "0", OMB_TEAM_PEOPLE: CLOUD_TEAM ? "1" : "0",
+      OMB_CLOUD_HOME: CLOUD_HOME ? "1" : "0", OMB_TEAM_PEOPLE: CLOUD_TEAM ? "1" : "0", OMB_ROOM: store.groupByThread(threadId) ? "1" : "0",
       OMB_VOICE_NOTES: (() => {
         const speaking = botForThread(botId, threadId) ?? store.bot(botId);
         return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
       })(),
       OMB_X_RESEARCH: researchCredential(cfg.treg?.key) && store.bot(botId)?.xResearch !== false ? "1" : "0",
       ...roleToolEnv(store.bot(botId)),
-      OMB_ESCALATIONS: chiefEscalationsEnabled(cfg) ? "1" : "0",
+      OMB_ESCALATIONS: chiefEscalationsEnabled(cfg) ? "1" : "0", OMB_COMPUTER_SELECTION: computerSelectionTurns.get(threadId)?.generation === generation ? "1" : "0",
     },
   };
 }
@@ -2010,9 +1983,6 @@ const teamSetupDecisionText = (request: TeamSetupRequest): string =>
   `OpenMausBot team setup decision ${request.requestId}: ${JSON.stringify(request.result)}. Report this exact result and continue the user's already requested work. Do not ask for confirmation again or repeat this setup/deletion. A denied or cancelled operation did not authorize any substitute action. Existing thread models were not changed.`;
 const connectionUpdateText = (labels: readonly string[]): string =>
   `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
-const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"): string => outcome === "provided"
-  ? `OpenMausBot credential update: the user securely provided ${label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
-  : `OpenMausBot credential update: the user declined to provide ${label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
 
 /** In a room (`memberId`) only this member's cards: one member's park never swallows another's. */
 function resumableCards(threadId: string, since: number, memberId?: string): Array<{ id: string; waits: string }> {
@@ -2073,7 +2043,7 @@ function reconcileParkedNode(node: HandoffView): boolean {
     }
     const secret = message.secret;
     if (secret && !secret.superseded && (secret.provided || secret.dismissed)) {
-      if (!coordinator.answerNode(node.id, credentialUpdateText(secret.label, secret.provided ? "provided" : "dismissed"))) return false;
+      if (!coordinator.answerNode(node.id, secretCards.updateText(message.id, secret, secret.provided ? "provided" : "dismissed"))) return false;
       if (!secret.resumed) store.patchMessage(node.threadId, message.id, { secret: { ...secret, resumed: true, error: undefined } });
       return true;
     }
@@ -2946,7 +2916,7 @@ const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), E
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
 // Before the new-bot default is read: a saved default may name the engine.
-await retryComputerEngineMove();
+await retryComputerEngineMove(); mcpServersHost.boot();
 if (store.needsSeed()) await Promise.race([cloudCreditStarted, new Promise(resolve => setTimeout(resolve, 15_000).unref())]);
 if (store.needsSeed()) { firstEngineRead(); await refreshUnsetModelSelections(); }
 else enginesRead = registry.readAtStart(enginesByUse([cfg.defaultModelSelection, ...store.bots.map((bot) => bot.modelSelection)]), firstEngineRead).then(async ({ engines, changed }) => {
@@ -3083,7 +3053,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) + describeConnectorScopes(bot.connectorScopes) : "" },
     { id: "highlevel", label: "HighLevel", text: caps?.highlevelMcp === true && highlevelHost.mounts(bot) ? highlevelHost.prompt(bot) : "" },
     ...phones.previewParts(bot, caps?.deviceMcp === true),
-    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot))) : "" }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(bot) },
+    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot)), mcpServersHost.off(bot)) : "" }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(bot) },
     { id: "browser", label: "Browser", text: previewPlan.browser ? browserPromptFor(bot, agentsMounted) : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
@@ -4678,7 +4648,7 @@ store.onChange((change) => {
       break;
     case "bot.deleted":
       sentThreads.delete(change.botId);
-      try { commandAllowlist.clear(change.botId); }
+      try { commandAllowlist.clear(change.botId); mcpServersHost.botDeleted(change.botId); }
       catch { console.error("[command-allowlist] Could not remove deleted bot's saved rules."); }
       broadcast({ kind: "bot.deleted", botId: change.botId });
       break;
@@ -6505,13 +6475,13 @@ bus.subscribe((event: RuntimeEvent) => {
   const privateImageEvent = event.type === "item.completed" && event.itemType === "assistant_image";
   if (!privateImageEvent) {
     // Exact executable input is internal; the bus's persistence redactor does not scrub the live event.
-    const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined } : event;
+    const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined, reads: undefined } : event;
     broadcast({ kind: "runtime", event: publicEvent });
   }
   const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
   limitClock.noteRuntimeEvent(runningTurnEngines.get(event.threadId)?.instanceId, event);
   const ownerBot = store.botByThread(event.threadId);
-  const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined;
+  const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined; if (bot) { limitTakeover.noteRuntimeEvent(bot.modelSelection, event); if (event.type === "turn.completed" && event.ok) limitTakeover.worked(bot.id, bot.modelSelection); }
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
   const speaker = group ? groupSpeakers.get(event.threadId) : undefined;
@@ -6563,7 +6533,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
-      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model);
+      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model); if (bot && event.mcpFailed?.length) mcpServersHost.health.engineFailed(bot.id, event.mcpFailed);
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
@@ -6595,7 +6565,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
           toolName = existing?.name ?? "tool";
           store.patchMessage(event.threadId, messageId, {
-            tool: { ...existing, name: toolName, ok: event.ok, output: event.output },
+            tool: { ...existing, name: toolName, ok: event.ok, output: event.output === undefined ? undefined : scrubHeldSecrets(event.output) },
           });
           toolMessageByItem.delete(itemKey);
         }
@@ -6615,7 +6585,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const message = pushMessage({
           role: "bot",
           kind: "activity",
-          tool: { name, spoken: narrateTool(name) ?? undefined, ...(event.step ? { step: event.step } : {}), summary: event.summary, input: event.input, itemId: event.itemId ?? event.eventId },
+          tool: { name, spoken: narrateTool(name) ?? undefined, ...(event.step ? { step: event.step } : {}), summary: event.summary, input: event.input === undefined ? undefined : scrubHeldSecrets(event.input), itemId: event.itemId ?? event.eventId },
           turnId: liveTurnId,
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
@@ -6651,7 +6621,7 @@ bus.subscribe((event: RuntimeEvent) => {
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
-          toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)),
+          toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)), ownFilesRead: !guestDriven && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
         }))
         : null;
       // Claude accepts --permission-mode auto for any model but silently starts in Manual where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it).
@@ -6915,7 +6885,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const failureDetail = turnStops.failureCause(event) ?? "the run ended without a result";
       // Filed once the thread has settled, so the Chief's retry finds it free. A turn the person stopped is cancelled, whatever its engine said.
       const facts = { ...turnStops.read(event.threadId, event.turnId)?.flags, stopReason: directRequestOwners.get(event.threadId)?.stopped ? "cancelled" : event.stopReason };
-      const fileIncident = () => { if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail, facts }); };
+      const fileIncident = () => { if (broken && (!facts.limit || limitTakeover.firstIncident(broken.id, broken.modelSelection, facts.limit, facts.limitResetsAt))) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail, facts, notified: Boolean(facts.limit) }); };
       if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal);
       else if (bot && event.ok) quotaSwitch.turnSucceeded(bot, event.threadId);
       const question = bot && event.ok && !stopped && completedTurnId && !routineRun && chiefEscalationsEnabled(cfg) ? needsInputQuestion(store.activePath(event.threadId)
@@ -8186,7 +8156,7 @@ async function startTurn(
       }
       // User MCP servers' tools are never pre-allowed: every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true && !proactive.fence.confines(threadId)) {
-        const custom = await teamConnections.turnMcp(bot, threadId, dispatchClaimId);
+        const custom = await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, dispatchClaimId));
         attachCustomMcp(integrations, custom, cfg, { botId: bot.id, threadId });
         if (Object.keys(custom).length) Object.assign(integrations, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
@@ -8640,7 +8610,7 @@ async function startTurn(
         { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : ""), canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME), botOpened: plan.botOpened }) },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER)) + firstHourHooks.prompt(bot.id, threadId) : "" },
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
-        { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot) + teamConnections.prompt(threadId, integrations) },
+        { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot) + teamConnections.prompt(threadId, integrations) },
         { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
         { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
         { id: "highlevel", label: "HighLevel", text: integrations.highlevel ? highlevelHost.prompt(liveBot ?? bot) : "" },
@@ -8691,8 +8661,9 @@ async function startTurn(
       const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) + nearLimitNote(limitClock.limit(instanceId), engineName(instanceId), hostTimeZone()) : "";
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
       const startupRecovery = cfg.automaticRecovery?.enabled === true && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0));
-      const limitedUntil = startupRecovery ? limitClock.blockedUntil(instanceId) : null;
-      if (limitedUntil) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitedUntil);
+      const engineHeld = limitClock.blockedUntil(instanceId), modelHeld = engineHeld ? null : limitTakeover.modelHeld({ instanceId, model }), limitScope = engineHeld ? "engine" as const : modelHeld?.scope ?? "engine", limitResets = engineHeld ? limitClock.resetAt(instanceId) ?? undefined : modelHeld?.resetsAt;
+      // A limit already known: the turn goes straight to an AI that can carry on, with the reset only when one was named.
+      if ((engineHeld || modelHeld) && (startupRecovery || (quotaSwitchEnabled() && limitTakeover.backups(bot.id, { instanceId, model }, limitScope).length))) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitResets && limitResets > Date.now() ? limitResets : undefined, limitScope, true);
       const dispatch = await guardTurnDispatch(shareNote.after(quickFallback.sendTurn(instance, {
         threadId,
         botId: bot.id,
@@ -8770,7 +8741,7 @@ async function startTurn(
         directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
       if (e instanceof TurnNotStartedError) {
         retireProviderTurn(e.turnId);
-        if (e instanceof TurnUsageLimitRefusedError) limitClock.noteRefusal(instanceId, e.resetsAt);
+        if (e instanceof TurnUsageLimitRefusedError && !e.known) { if (e.scope === "engine") limitClock.noteLimit(instanceId, e.resetsAt); else limitTakeover.holdModel({ instanceId, model }, e.scope, e.resetsAt); }
         if (!mayRecover) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
       handoffs.abandon(threadId, dispatchClaimId);
@@ -8818,11 +8789,11 @@ async function startTurn(
       if (e instanceof PlaceUnavailableError) clearFailedAutoPin(bot.id, threadId, e.place);
       let message = e instanceof Error ? e.message : String(e);
       const current = store.projectBotForTask(bot.id, threadId);
-      const backups = cfg.automaticRecovery?.enabled
+      const backups = e instanceof TurnUsageLimitRefusedError && current && quotaSwitchEnabled() ? limitTakeover.backups(bot.id, current.modelSelection, e.scope) : cfg.automaticRecovery?.enabled
         ? current?.fallback?.length ? current.fallback : cfg.automaticRecovery.backup ? [cfg.automaticRecovery.backup] : []
         : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
-        registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId], instanceConfigs(cfg)[instanceId])
+        registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? (candidate.instanceId === instanceId ? e.scope !== "engine" : limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId], instanceConfigs(cfg)[instanceId]))
           : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
         (candidate.instanceId !== instanceId || candidate.model !== model));
       const backup = backups[nextIndex];
@@ -8855,7 +8826,7 @@ async function startTurn(
             store.switchTaskModel(bot.id, threadId, checked.selection, false, false, {
               ...hostedModels?.resetTask(current.modelSelection, checked.selection), rewound: true,
             });
-            if (e instanceof TurnUsageLimitRefusedError) limitFailovers.record({ botId: bot.id, threadId, from: current.modelSelection, to: checked.selection, resetsAt: e.resetsAt ?? null, at: Date.now() });
+            if (e instanceof TurnUsageLimitRefusedError) { limitFailovers.record({ botId: bot.id, threadId, from: current.modelSelection, to: checked.selection, resetsAt: e.resetsAt ?? null, at: Date.now() }); limitTakeover.tell(current, current.modelSelection, { ...(e.resetsAt ? { resetsAt: e.resetsAt } : {}), scope: e.scope, backup: checked.selection }); }
             store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
               name: e instanceof TurnUsageLimitRefusedError ? `recovery: ${failoverLine(engineName(instanceId), engineName(target.instanceId), e.resetsAt)}` : `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnAuthenticationRefusedError ? "is signed out" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
             } });
@@ -9039,7 +9010,7 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
 
 const engineName = (engine: string) => engineLabel(engine, registry.get(engine) ?? undefined);
 const limitClock = new LimitResetClock({ accounts: () => planAccountsFromInstances(instanceConfigs(cfg)), onChange: () => routines?.retimeLimitResets(),
-  waiting: () => Boolean(routines?.listRoutines().some((routine) => routine.enabled && routine.schedule.type === "limit_reset")) });
+  waiting: () => Boolean(routines?.listRoutines().some((routine) => routine.enabled && routine.schedule.type === "limit_reset")) }); const limitTakeover = createLimitTakeover({ file: join(DATA_DIR, "limit-notices.json"), configs: () => instanceConfigs(cfg), context: selectionContext, blockedUntil: (engine) => limitClock.blockedUntil(engine), engineName, engines: () => selectableInstances(registry.instances().map((engine) => ({ instanceId: engine.instanceId, driverKind: engine.driverKind, displayName: engine.displayName, enabled: engine.enabled, access: registry.access(engine.instanceId), models: engine.models, snapshot: registry.knownSnapshot(engine.instanceId) ?? { state: "unavailable" as const, reason: "not read yet" }, capabilities: engine.adapter.capabilities }))), chosen: (botId) => [...(store.bot(botId)?.fallback ?? []), ...(cfg.automaticRecovery?.backup ? [cfg.automaticRecovery.backup] : [])], tell: (about, text) => notify(buildNoticeNotification(about, store.bot(about.id)?.threadId ?? "", text)), record: (failover) => limitFailovers.record(failover) });
 const limitFailovers = new LimitFailovers({ file: join(DATA_DIR, "limit-failovers.json"), blockedUntil: (engine) => limitClock.blockedUntil(engine), engineName,
   threadModel: (botId, threadId) => store.projectBotForTask(botId, threadId)?.modelSelection ?? null,
   note: (threadId, line) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${line}`, ok: true } }),
@@ -9051,7 +9022,7 @@ const automationDestinations = createAutomationDestinations({ store, mainThread:
   cloud: CLOUD_HOME ? { owner: CLOUD_OWNER_KEY!, opener: routineOpener, reportFromOthers: cloudReportFromOthers, opened: (threadId, person) => threadStarters.set(threadId, person) } : null });
 routines = new RoutineManager({
   emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks,
-  limitBackup: (botId) => cfg.automaticRecovery?.enabled === true && Boolean(store.bot(botId)?.fallback?.length || cfg.automaticRecovery.backup),
+  limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled() ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope).length) : cfg.automaticRecovery?.enabled === true && Boolean(bot?.fallback?.length || cfg.automaticRecovery.backup); },
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
   skipStartupRuns: Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR), // a Cloud home waking from a sleep it was stopped for
@@ -9909,7 +9880,7 @@ const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAcce
   onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
     kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message, alreadyNotified: true }) };
 
-const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage });
+const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage, takeover: limitTakeover });
 
 // Peer approvals live only in memory: settle every peer card still open on disk, or it locks the composer forever.
 {
@@ -10141,7 +10112,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   if (instance.adapter.capabilities.customMcp === true) {
-    attachCustomMcp(integrations, await teamConnections.turnMcp(bot, threadId, internalGeneration), cfg, { botId: bot.id, threadId });
+    attachCustomMcp(integrations, await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, internalGeneration)), cfg, { botId: bot.id, threadId });
   }
   // An interrupt during connected-app setup must still stop the queued room operation before it starts a process.
   if (isCancelled?.()) return false;
@@ -10495,7 +10466,7 @@ async function runClaimedGroupMemberTurn(
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) }, { id: "people", label: "People", text: teamMessages.prompt(bot.id, threadId, Boolean(integrations.agents)) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
     { id: "shell", label: "Long-running commands", text: workspace ? longCommandsPrompt(roomComputerPromptKind) : "" },
-    { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) + teamConnections.prompt(threadId, integrations) },
+    { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) + teamConnections.prompt(threadId, integrations) },
     { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
@@ -11839,138 +11810,8 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {
-  return `${threadId}:${messageId}:${requestKey}`;
-}
-
-function credentialDesktopHandoff(label: string): string {
-  return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
-}
-
-function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
-  const owner = connectorThread(botId, threadId);
-  if (!owner) return null;
-  // Actionable only on the visible branch; in a channel only the requesting bot may bind the credential into HPKE AAD or resume its turn.
-  const message = store.activePath(threadId).find((candidate) => candidate.id === messageId);
-  if (owner.group && message?.from?.botId !== botId) return null;
-  return message?.kind === "secret" && message.secret ? message : null;
-}
-
-function currentSecretState(botId: string, threadId: string, messageId: string) {
-  const message = secretMessage(botId, threadId, messageId);
-  if (!message?.secret) return null;
-  return {
-    provided: message.secret.provided === true,
-    resumed: message.secret.resumed === true,
-  };
-}
-
-function resumeSecretCard(botId: string, threadId: string, messageId: string, outcome: "provided" | "dismissed") {
-  const message = secretMessage(botId, threadId, messageId);
-  if (!message?.secret) return false;
-  if (message.secret.resumed) return true;
-  const resumed = answerCardNode(threadId, messageId, credentialUpdateText(message.secret.label, outcome));
-  store.patchMessage(threadId, message.id, {
-    secret: {
-      ...message.secret,
-      provided: outcome === "provided" ? true : message.secret.provided,
-      dismissed: outcome === "dismissed" ? true : message.secret.dismissed,
-      ...(resumed ? { resumed: true, error: undefined } : {}),
-    },
-  });
-  return true;
-}
-
-async function provideSecretFromPhone(
-  context: PhoneSecretContext,
-  authenticatedDeviceId: string,
-): Promise<{ provided: boolean; resumed: boolean }> {
-  const owner = connectorThread(context.botId, context.threadId);
-  const message = secretMessage(context.botId, context.threadId, context.messageId);
-  if (!owner || !message?.secret) throw new PhoneSecretError("No such credential request", 404);
-  if (message.secret.dismissed) throw new PhoneSecretError("This credential request was dismissed", 409);
-  if (message.secret.superseded) throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
-  assertPhoneSecretRequestMatches(context, authenticatedDeviceId, {
-    target: message.secret.target,
-    requestKey: message.secret.requestKey,
-  });
-  const operationId = phoneSecretOperationId(context);
-  if (message.secret.phoneOperationId && message.secret.phoneOperationId !== operationId) {
-    throw new PhoneSecretError(
-      "This credential request was already completed by another submission",
-      409,
-    );
-  }
-  // Recording the winning operation precedes completing the card, so an exact retry repairs a crash without writing the credential again.
-  if (message.secret.phoneOperationId === operationId && !message.secret.provided) {
-    if (!credentialIsConfigured(botLogins.credentialConfig(cfg), message.secret.target)) {
-      throw new PhoneSecretError(`${message.secret.label} is no longer configured`, 409);
-    }
-    if (!resumeSecretCard(context.botId, context.threadId, context.messageId, "provided")) {
-      throw new PhoneSecretError("This credential request is no longer available", 409);
-    }
-    const recovered = currentSecretState(context.botId, context.threadId, context.messageId);
-    if (!recovered) throw new PhoneSecretError("This credential request is no longer available", 409);
-    return recovered;
-  }
-  if (message.secret.provided) {
-    if (message.secret.phoneOperationId !== operationId) {
-      throw new PhoneSecretError(
-        "This credential request was already completed by another submission",
-        409,
-      );
-    }
-    if (!credentialIsConfigured(botLogins.credentialConfig(cfg), message.secret.target)) {
-      throw new PhoneSecretError(`${message.secret.label} is no longer configured`, 409);
-    }
-    if (!message.secret.resumed && !resumeSecretCard(
-      context.botId,
-      context.threadId,
-      context.messageId,
-      "provided",
-    )) {
-      throw new PhoneSecretError("This credential request is no longer available", 409);
-    }
-    const recovered = currentSecretState(context.botId, context.threadId, context.messageId);
-    if (!recovered) throw new PhoneSecretError("This credential request is no longer available", 409);
-    return recovered;
-  }
-
-  const submissionKey = phoneSecretSubmissionKey(context.threadId, context.messageId, context.requestKey);
-  await phoneSecretSubmissions.run({
-    cardKey: submissionKey,
-    botId: context.botId,
-    threadId: context.threadId,
-    ...(owner.group ? { groupId: owner.group.id } : {}),
-  }, operationId, async () => {
-    await phoneSecrets.provide(context);
-    const current = secretMessage(context.botId, context.threadId, context.messageId);
-    if (!current?.secret || current.secret.requestKey !== context.requestKey) {
-      throw new PhoneSecretError("This credential request is no longer available", 409);
-    }
-    if (current.secret.dismissed) {
-      throw new PhoneSecretError("This credential request was dismissed", 409);
-    }
-    // The card may have been superseded during the save: completing it would leave two cards resolved.
-    if (current.secret.superseded) {
-      throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
-    }
-    // Electron acknowledges only after credentials.bin and the config update both commit; keep this assertion so no handler resumes first.
-    if (!credentialIsConfigured(botLogins.credentialConfig(cfg), current.secret.target)) {
-      throw new PhoneSecretError(`${current.secret.label} was not saved yet`, 409);
-    }
-    // Persist the winning envelope id before completing the card, so a new sealed value is never reported as the saved one.
-    store.patchMessage(context.threadId, current.id, {
-      secret: { ...current.secret, phoneOperationId: operationId },
-    });
-    if (!resumeSecretCard(context.botId, context.threadId, context.messageId, "provided")) {
-      throw new PhoneSecretError("This credential request is no longer available", 409);
-    }
-  });
-  const settled = currentSecretState(context.botId, context.threadId, context.messageId);
-  if (!settled) throw new PhoneSecretError("This credential request is no longer available", 409);
-  return settled;
-}
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
 
@@ -12280,7 +12121,7 @@ function mcpServerResponse() {
     const auth = mcpOAuth.authState(server.name, server.url);
     const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
     return auth === "none" ? listed : { ...listed, auth };
-  }).map(server =>
+  }).map(mcpServersHost.listing).map(server =>
     managedPolicy.mcpAllowed(server.name, "url" in server ? server.url : undefined) ? server : { ...server, managedBy: policy!.organizationName });
   return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
 }
@@ -12840,7 +12681,7 @@ ROUTES.push(createMcpServerRoutes({
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
-  mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog: chatAppsMcp, forgetPeople: (name) => teamConnections.forgetServer(name),
+  mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog: chatAppsMcp, forgetPeople: (name) => teamConnections.forgetServer(name), health: mcpServersHost.health,
 }));
 ROUTES.push(createSetupImportRoutes({ local: DESKTOP_MANAGED && !CLOUD_HOME && !HOSTED_WORKSPACE, cfg, mcpPolicyRefusal, persistMcpServers,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } } }));
@@ -14083,7 +13924,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { hits, memoryHits, teamHits: scope === "conversations" ? [] : teamMemory.search(from.section, q, limit, range) });
       }
-      // session_read: a message id from another bot's thread reads as missing, not forbidden, so the id space leaks nothing.
+      // Reading one message: an id from another bot's thread reads as missing, not forbidden, so the id space leaks nothing.
       if (method === "GET" && path === "/api/internal/session-read") {
         const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
         const from = store.bot(fromBotId);
@@ -14836,16 +14677,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (mcpConfigBusy) return json(res, 409, { error: "MCP servers are already being updated." });
         mcpConfigBusy = true;
         try {
-          const body = await readInternalBody();
-          const added = addDisabledMcpServer(cfg.mcpServers ?? {}, body);
+          const redeemed = secretCards.redeemMcpServer(await readInternalBody(), internalSender.id, internalCapability.threadId);
+          if (!redeemed.ok) return json(res, 400, { error: redeemed.error });
+          const added = mcpServersHost.botAdd(cfg.mcpServers ?? {}, redeemed.value, internalSender.id);
           if (!added.ok) return json(res, added.status, { error: added.error });
           const refusal = mcpPolicyRefusal(added.name, added.server);
           if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
-          persistMcpServers(added.next);
+          persistMcpServers(added.next); redeemed.commit();
           const server = added.server;
           const remote = isRemoteMcpServer(server);
           return json(res, 201, {
-            name: added.name,
+            name: added.name, ...(!remote && server.bot ? { own: true } : {}), ...(added.moved?.length ? { keptIn: added.moved.map(({ to }) => relative(workspaceDir(internalSender.id), to)) } : {}),
             enabled: false,
             transport: remote ? server.type : "command",
             target: remote ? server.url : server.command,
@@ -14856,43 +14698,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           mcpConfigBusy = false;
         }
       }
-      if (method === "POST" && path === "/api/internal/request-credential") {
-        const body = await readInternalBody();
-        const from = internalSender;
-        const fromThreadId = internalCapability.threadId;
-        const owner = connectorThread(from.id, fromThreadId);
-        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        if (!isCredentialTargetId(body.credentialId)) {
-          return json(res, 400, { error: "unsupported credential id" });
-        }
-        const credentialId: CredentialTargetId = body.credentialId;
-        const target = CREDENTIAL_TARGETS[credentialId];
-        if (credentialIsConfigured(botLogins.credentialConfig(cfg), credentialId)) {
-          return json(res, 200, { alreadyConfigured: true, label: target.label });
-        }
-        // A later request supersedes pending cards; the fresh card is appended FIRST, so a failed save leaves the prior cards actionable.
-        const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
-        const message = store.appendMessage(fromThreadId, {
-          role: "bot",
-          kind: "secret",
-          text: credentialDesktopHandoff(target.label),
-          ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
-          secret: {
-            target: credentialId,
-            label: target.label,
-            description: `${reason ? `${target.description} ${reason}` : target.description} ${from.name} can use it but never read it back.`,
-            placeholder: target.placeholder,
-            helpUrl: target.helpUrl,
-            requestKey: randomUUID(),
-          },
-        });
-        for (const prior of store.activePath(fromThreadId)) {
-          if (prior.id === message.id) continue;
-          if (!prior.secret || !isPendingCredentialRequest(prior, credentialId, from.id, Boolean(owner.group))) continue;
-          store.patchMessage(fromThreadId, prior.id, { secret: { ...prior.secret, superseded: true } });
-        }
-        return json(res, 201, { messageId: message.id, label: target.label });
-      }
+      if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalSignInRoutes({
         readBody: readInternalBody,
         request: (site, reason) => requestSignIn(internalSender, internalCapability.threadId, site, reason),
@@ -15679,83 +15485,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "DELETE") return json(res, 200, await composio.removeAccount(cfg, m[1], m[2]));
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
-
-    // An HPKE envelope bound to the paired device, bot, task, card and target; only the embedded Electron server holds the key to open it.
-    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/provide$/);
-    if (m && method === "POST") {
-      if (req.headers["x-openmausbot-companion"] !== "1") {
-        return json(res, 403, { error: "Secure phone entry must come from a paired phone" });
-      }
-      const rawDeviceId = req.headers["x-openmausbot-companion-device"];
-      const authenticatedDeviceId = Array.isArray(rawDeviceId) ? "" : String(rawDeviceId ?? "");
-      if (!/^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
-        return json(res, 401, { error: "This paired phone could not be verified" });
-      }
-      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
-        return json(res, 415, { error: "content-type must be application/json" });
-      }
-      const parsed = phoneSecretEnvelopeSchema.safeParse(await readBody(req, 16_384));
-      if (!parsed.success || !isCredentialTargetId(parsed.data?.target)) {
-        return json(res, 400, { error: "The encrypted credential request is invalid" });
-      }
-      const state = await provideSecretFromPhone({
-        ...parsed.data,
-        botId: m[1],
-        messageId: m[2],
-        target: parsed.data.target,
-      }, authenticatedDeviceId);
-      return json(res, 200, state);
-    }
-
-    // Desktop credential cards never send the credential through this route: Electron saves it to the OS-backed store first.
-    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/(provided|resume|dismiss)$/);
-    if (m && method === "POST") {
-      const body = await readBody(req);
-      const threadId = String(body.threadId ?? "");
-      const message = secretMessage(m[1], threadId, m[2]);
-      if (!message?.secret) return json(res, 404, { error: "no such credential request" });
-      if (phoneSecretSubmissions.has(
-        phoneSecretSubmissionKey(threadId, message.id, message.secret.requestKey),
-      )) {
-        return json(res, 409, { error: "this credential is currently being saved from a phone" });
-      }
-      if (m[3] === "provided") {
-        if (message.secret.dismissed) return json(res, 409, { error: "this credential request was dismissed" });
-        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
-        if (!credentialIsConfigured(botLogins.credentialConfig(cfg), message.secret.target)) {
-          return json(res, 409, { error: `${message.secret.label} was not saved yet` });
-        }
-        if (!resumeSecretCard(m[1], threadId, message.id, "provided")) {
-          return json(res, 409, { error: "this credential request is no longer available" });
-        }
-        const state = currentSecretState(m[1], threadId, message.id);
-        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
-        return json(res, 200, state);
-      }
-      if (m[3] === "resume") {
-        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
-        const outcome = credentialResumeOutcome(message.secret);
-        if (!outcome) {
-          return json(res, 409, { error: "this credential request is not ready to resume" });
-        }
-        if (outcome === "provided" && !credentialIsConfigured(botLogins.credentialConfig(cfg), message.secret.target)) {
-          return json(res, 409, { error: `${message.secret.label} is no longer configured` });
-        }
-        if (!resumeSecretCard(m[1], threadId, message.id, outcome)) {
-          return json(res, 409, { error: "this credential request is no longer available" });
-        }
-        const state = currentSecretState(m[1], threadId, message.id);
-        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
-        return json(res, 200, { resumed: state.resumed });
-      }
-      if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
-      if (!message.secret.provided && !resumeSecretCard(m[1], threadId, message.id, "dismissed")) {
-        return json(res, 409, { error: "this credential request is no longer available" });
-      }
-      const state = currentSecretState(m[1], threadId, message.id);
-      if (!state) return json(res, 409, { error: "this credential request is no longer available" });
-      return json(res, 200, { dismissed: true, resumed: state.resumed });
-    }
 
     // The browser auth URL goes only to this local UI and is never stored in the transcript.
     m = path.match(/^\/api\/bots\/([\w-]+)\/connector-cards\/([\w-]+)\/(authorize|status|resume|dismiss)$/);

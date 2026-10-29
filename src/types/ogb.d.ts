@@ -161,8 +161,8 @@ const __APP_VERSION__: string;
         open?: (id: string) => Promise<unknown>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), paste a server's pairing link, or type its address. */
         add?: (choice: "cloud" | "link" | "address") => Promise<unknown>;
-        /** The colour of the place this page is, and whether it can be changed here (null on this computer's page).
-         * Absent on an older app. */
+        /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
+         * older app. */
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
         /** That place's colour, from the person's click: one of the six swatches, or null for none. */
         color?: (swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
@@ -184,6 +184,9 @@ const __APP_VERSION__: string;
         interest(): Promise<void>;
         /** The sheet is open on this page (main then says "ready" here, not with a notification). */
         sheet(open: boolean): Promise<void>;
+        /** A new organization on the Team plan this account pays for, of this name and swatch: no checkout; only from the person's click. */
+        organization?(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "added" | "taken" | "unsupported" | "failed" }
+          | { outcome: "blocked"; blocked: import("../../electron/cloud-list.mjs").OrganizationBlock }>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
