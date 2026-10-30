@@ -556,18 +556,22 @@ export interface AttentionRow {
 
 
 // Local mod (Imobiturbo, 27/10/2026): a show_widget card that asks something and was never sent back. A widget with a
-// form, a confirm or a button counts; one already sent carries `widget.settled`.
-export function openWidgetRows(since: number): Array<{ threadId: string; id: string; at: number; title: string | null }> {
+// form, a confirm or a button counts; one already sent carries `widget.settled`. In `keepThread` (the MausBot's own
+// conversation, where its decision cards go) its newest card stays even after the person wrote there about something
+// else (30/10/2026): only an answer, or a newer card, takes it off Needs you.
+export function openWidgetRows(since: number, keepThread?: string): Array<{ threadId: string; id: string; at: number; title: string | null }> {
   return db().prepare(
     "SELECT w.thread_id AS threadId, w.id, w.at, json_extract(w.json, '$.widget.root.title') AS title FROM messages w " +
     "WHERE w.kind = 'widget' AND w.at >= ? AND json_extract(w.json, '$.widget.settled') IS NULL " +
     "AND json_extract(w.json, '$.serverCard') IS NULL AND (json_extract(w.json, '$.widget.root.confirm') IS NOT NULL " +
     "OR w.json LIKE '%\"onSubmitAction\"%' OR w.json LIKE '%\"onClickAction\"%') " +
-    // The person wrote in that conversation afterwards: the card is behind them.
-    "AND NOT EXISTS (SELECT 1 FROM messages u WHERE u.thread_id = w.thread_id AND u.at > w.at AND u.kind = 'text' " +
-    "AND json_extract(u.json, '$.role') = 'user' AND json_extract(u.json, '$.from') IS NULL AND json_extract(u.json, '$.roomRequest') IS NULL) " +
+    // In keepThread a newer card replaces it; elsewhere the person writing there afterwards puts it behind them.
+    "AND (CASE WHEN w.thread_id = ? THEN NOT EXISTS (SELECT 1 FROM messages n WHERE n.thread_id = w.thread_id AND n.at > w.at " +
+    "AND n.kind = 'widget' AND (json_extract(n.json, '$.widget.root.confirm') IS NOT NULL OR n.json LIKE '%\"onSubmitAction\"%' " +
+    "OR n.json LIKE '%\"onClickAction\"%')) ELSE NOT EXISTS (SELECT 1 FROM messages u WHERE u.thread_id = w.thread_id AND u.at > w.at AND u.kind = 'text' " +
+    "AND json_extract(u.json, '$.role') = 'user' AND json_extract(u.json, '$.from') IS NULL AND json_extract(u.json, '$.roomRequest') IS NULL) END) " +
     "ORDER BY w.at",
-  ).all(since) as unknown as Array<{ threadId: string; id: string; at: number; title: string | null }>;
+  ).all(since, keepThread ?? null) as unknown as Array<{ threadId: string; id: string; at: number; title: string | null }>;
 }
 
 export function attentionRows(since: number): AttentionRow[] {

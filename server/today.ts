@@ -333,12 +333,12 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
 
   // Local mod (Imobiturbo, 27/10/2026): the person's open cards and decisions count too: the newest show_widget still
   // waiting in each conversation, and the open `decisao` lines of the shared caixa_natan, which the MausBot delivers.
-  for (const row of openWidgetRows(now - NEEDS_YOU_WINDOW_MS)) {
+  const home = (sources.bots as ReadonlyArray<{ id: string; threadId: string; defaultBot?: boolean; hidden?: boolean }>).find((bot) => bot.defaultBot && !bot.hidden);
+  for (const row of openWidgetRows(now - NEEDS_YOU_WINDOW_MS, home?.threadId)) {
     const botId = owners.get(row.threadId)?.botId;
     if (!botId || !seen(row.threadId) || (viewer.asks && !viewer.asks(botId, row.threadId))) continue;
     keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: plainTitle(row.title || "A card is waiting for you") });
   }
-  const home = (sources.bots as ReadonlyArray<{ id: string; threadId: string; defaultBot?: boolean; hidden?: boolean }>).find((bot) => bot.defaultBot && !bot.hidden);
   if (home && seen(home.threadId) && !items.has(`question:${home.threadId}`)) {
     const open = openDecisions();
     if (open.length) {

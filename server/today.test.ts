@@ -1,5 +1,5 @@
 import { rmSync } from "node:fs";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import type { NeedsYouItem } from "../shared/today.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
@@ -270,6 +270,25 @@ describe("needs you", () => {
     ]);
     w.store.patchMessage(mia.threadId, asked.id, { widget: { v: 1, root, settled: { at: at(13) } } } as never);
     expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
+  });
+
+  it("local mod: the MausBot's newest card stays after the person writes there; elsewhere it goes", () => {
+    vi.stubEnv("OMB_OPENBOT_DATA_PATH", "");
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    (w.store.bot(w.atlas.id) as { defaultBot?: object }).defaultBot = {};
+    const card = (title: string) => ({ v: 1, root: { type: "Card", id: "n1", title, confirm: { label: "Send", action: { type: "pick" } }, children: [] } });
+    w.say(w.atlas.threadId, { role: "bot", kind: "widget", at: at(9), text: "", widget: card("7 decisions") } as never);
+    const newest = w.say(w.atlas.threadId, { role: "bot", kind: "widget", at: at(12, 3), text: "", widget: card("10 decisions") } as never);
+    w.say(mia.threadId, { role: "bot", kind: "widget", at: at(12, 3), text: "", widget: card("Pick a date") } as never);
+    w.say(w.atlas.threadId, { role: "user", kind: "text", text: "where are my cards?", at: at(12, 5) });
+    w.say(mia.threadId, { role: "user", kind: "text", text: "Friday", at: at(12, 5) });
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: newest.id, at: at(12, 3), botId: w.atlas.id, threadId: w.atlas.threadId, text: "10 decisions" },
+    ]);
+    w.store.patchMessage(w.atlas.threadId, newest.id, { widget: { ...card("10 decisions"), settled: { at: at(13) } } } as never);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
+    vi.unstubAllEnvs();
   });
 
   it("drops a question the person closed, and lists a request asked again only where it was asked last", () => {
