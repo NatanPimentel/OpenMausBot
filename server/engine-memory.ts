@@ -421,11 +421,14 @@ export class EngineMemory {
 }
 
 const ENGINE_MAX_ACTIVE = engineMaxActive();
+const CLOUD_GATE = process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team";
 export const engineMemory = new EngineMemory({
-  enabled: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team" || ENGINE_MAX_ACTIVE !== null)
-    && process.platform === "linux",
+  enabled: (CLOUD_GATE || ENGINE_MAX_ACTIVE !== null) && process.platform === "linux",
   maxActive: ENGINE_MAX_ACTIVE,
   priorityBots: enginePriorityBots(),
+  // A desktop runs hundreds of processes: reading each one's share takes over a second on the server's thread (1.5 s for 766 on
+  // 2026-10-30), so there every engine counts as ENGINE_DEFAULT_BYTES instead of being measured.
+  ...(CLOUD_GATE ? {} : { groups: () => new Map<number, number>() }),
 });
 
 /**
