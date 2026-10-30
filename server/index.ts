@@ -9803,7 +9803,7 @@ function roomRoutingInput(
   userName: PersonName,
   sender?: ResolvedSender,
 ): RoomRoutingInput {
-  const clean = (value: string) => redactSecretsInText(extractTurnImages(value).text);
+  const clean = (value: string) => redactSecretsInText(extractTurnImages(value, { maxCount: Infinity, maxBytes: Infinity }).text);
   const humans = new Set<string>(typeof userName === "string" ? [userName] : []);
   const recent = history.flatMap((m) => {
     if (m.kind !== "text" || !m.text) return [];
