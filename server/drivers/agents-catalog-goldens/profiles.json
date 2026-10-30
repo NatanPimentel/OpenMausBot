@@ -1,7 +1,7 @@
 {
   "default": {
-    "bytes": 56030,
-    "sha256": "277330b3463508a9839dedd0dd99533fee12dd87441d0c344f0dd4d839b7e005",
+    "bytes": 59143,
+    "sha256": "563e77a638d5ed6cc4a748b3d7245926d461958aa1c4e3fc2875e16e62b83410",
     "tools": [
       "list_tables",
       "query_data",
@@ -52,8 +52,8 @@
     ]
   },
   "voice": {
-    "bytes": 56811,
-    "sha256": "d09ec1ba3563c2870f1ab963c12d8e39b304ac62f3409dac85380c73ce9d3f19",
+    "bytes": 59924,
+    "sha256": "86abb7efa9aaf6afd54e5b3fbfd768fc23260e7b99178ea2f0b04db112d9c54e",
     "tools": [
       "list_tables",
       "query_data",
@@ -105,8 +105,8 @@
     ]
   },
   "shared": {
-    "bytes": 58130,
-    "sha256": "13711eda72a72fd8088bf8175a318dffe4fdbf6b097c2e132b7a7e7f16f5b858",
+    "bytes": 61243,
+    "sha256": "939a5cae537a7c3190c6bd815a155184d54609a9265000ee68a04ab9f168954b",
     "tools": [
       "list_tables",
       "query_data",
@@ -159,8 +159,8 @@
     ]
   },
   "shared+voice": {
-    "bytes": 58911,
-    "sha256": "dd12ef0aa9fee6d8000afcd19eaab3442547e0317c6b0e66f10a0633df7d6801",
+    "bytes": 62024,
+    "sha256": "9ca7bc874d8c77f2b4f2911e5fa359e286eadcb664c635a7d93865e5b68667b9",
     "tools": [
       "list_tables",
       "query_data",
@@ -214,8 +214,8 @@
     ]
   },
   "skills": {
-    "bytes": 58849,
-    "sha256": "615ce770723a8d54f2239c307399edc88e1f120da635c0434dd5807c6a081a36",
+    "bytes": 61962,
+    "sha256": "10f9b2de2b502f9bc5828010a7d54e6abd4bd76c8cf183617f170dcda078d656",
     "tools": [
       "list_tables",
       "query_data",
@@ -268,8 +268,8 @@
     ]
   },
   "skills+voice": {
-    "bytes": 59630,
-    "sha256": "f57b83c6f2e67c8cfcb91ee96fe7e8573995e5a36d595cbbd0289c55a8806fbf",
+    "bytes": 62743,
+    "sha256": "04353645b423c71cbd486a8a6eecaddd1eace52e2376a0463adc500eb7083715",
     "tools": [
       "list_tables",
       "query_data",
@@ -323,8 +323,8 @@
     ]
   },
   "skills+shared": {
-    "bytes": 60949,
-    "sha256": "528b685195e1a5c4e5756f37b0d4fc9efa30584fa0a192d4f78a0a117b51c6a4",
+    "bytes": 64062,
+    "sha256": "0dcc222e7af8e0b9629dffc58613f4aaf9fc38bfdea41bfe23b722f1f45c03d8",
     "tools": [
       "list_tables",
       "query_data",
@@ -379,8 +379,8 @@
     ]
   },
   "skills+shared+voice": {
-    "bytes": 61730,
-    "sha256": "53f8f3d36d5baae695a581c106fe1d7e083de7c6da05f058754b999474f5c476",
+    "bytes": 64843,
+    "sha256": "80954e2da00c4ae165138e2a40eb4aa2da90ffc5c63cb469fc5e3ee1779c9f79",
     "tools": [
       "list_tables",
       "query_data",
@@ -436,8 +436,8 @@
     ]
   },
   "non-chief": {
-    "bytes": 46973,
-    "sha256": "73b31997bda74dce6110eca0cc661711f471ec0303aaddd794f0942182f56c5d",
+    "bytes": 50086,
+    "sha256": "f4e4f7d8428716ee5bdf46d4592fe8f926769502d8e93e5037b27b1052f4ae6f",
     "tools": [
       "list_tables",
       "query_data",
@@ -481,8 +481,8 @@
     ]
   },
   "voice+non-chief": {
-    "bytes": 47754,
-    "sha256": "b057caa85cd409fc246a90da38ac28d65b4115b11065c9b27dd53276e2c6f161",
+    "bytes": 50867,
+    "sha256": "a8bf3660bb8137b17c86fe414371b1a3c0b8d90fabf9f0deff9c2cf339af80d2",
     "tools": [
       "list_tables",
       "query_data",
@@ -527,8 +527,8 @@
     ]
   },
   "shared+non-chief": {
-    "bytes": 49073,
-    "sha256": "3447a9645994d6b098f9d674dccee5a7c6c920c703afc7ac8a9fd221a8c3d791",
+    "bytes": 52186,
+    "sha256": "a6a4b67905092ecfb21d218150f46842844e9e29e60bf7f5589d90a13de6b8d4",
     "tools": [
       "list_tables",
       "query_data",
@@ -574,8 +574,8 @@
     ]
   },
   "shared+voice+non-chief": {
-    "bytes": 49854,
-    "sha256": "f32c3b3b80e6440f8827b451022566a12e431f57b810d4f48f551fbb672e3e58",
+    "bytes": 52967,
+    "sha256": "f5191cc098f56e94870c5ac96cd202cdb43f64f805757c280bf1fab9787409e0",
     "tools": [
       "list_tables",
       "query_data",
@@ -622,8 +622,8 @@
     ]
   },
   "skills+non-chief": {
-    "bytes": 49792,
-    "sha256": "f0c3446e8bae858de81a94f54a0cc7a10f008ab1f8e02255818daad25b5447fd",
+    "bytes": 52905,
+    "sha256": "0f1d8cefe744030efd2acbeffb7fef8cce3c54f3b1df01bca5ecfbd2c25e8599",
     "tools": [
       "list_tables",
       "query_data",
@@ -669,8 +669,8 @@
     ]
   },
   "skills+voice+non-chief": {
-    "bytes": 50573,
-    "sha256": "634141dec1f2bf3babe3be74285d53fadd38d9267012a201ef35709bcaed46ea",
+    "bytes": 53686,
+    "sha256": "e447a941c9b98d6a908297b8d9d8378b67d9b6734727fac975972d9ccba8bdae",
     "tools": [
       "list_tables",
       "query_data",
@@ -717,8 +717,8 @@
     ]
   },
   "skills+shared+non-chief": {
-    "bytes": 51892,
-    "sha256": "bc114b25482e4f2dba7d78a674c6a3db8d89e35288b2fd48657eb968652d1e86",
+    "bytes": 55005,
+    "sha256": "8e10230c21fdd38a43372eac5d920a6fd972801bf5afd8765045dc0e1385a0fd",
     "tools": [
       "list_tables",
       "query_data",
@@ -766,8 +766,8 @@
     ]
   },
   "skills+shared+voice+non-chief": {
-    "bytes": 52673,
-    "sha256": "7971f0d71c3015ede83f7afed5783b451c367f552fa22b94b477b227708a99c6",
+    "bytes": 55786,
+    "sha256": "620bbdc112c916b160e1a2e2170e889a4d9e9b3ce0916cdfe45ac5537ac83020",
     "tools": [
       "list_tables",
       "query_data",
@@ -816,8 +816,8 @@
     ]
   },
   "skills+shared+voice+cloud-home": {
-    "bytes": 60811,
-    "sha256": "3cf72cdd6b27ea665cf9f3b4e61ad176800d9676eda9887d9ffb5512a2b1bda7",
+    "bytes": 63924,
+    "sha256": "c450f5a7b0708706f21f9646d55e705de108d4ef578de0808b4a6c11b3d8bdec",
     "tools": [
       "list_tables",
       "query_data",
@@ -872,8 +872,8 @@
     ]
   },
   "skills+shared+voice+non-chief+cloud-home": {
-    "bytes": 51754,
-    "sha256": "ccc7d02a98e2fe73f779ad942d24086087422dc8cd4cbfcbb069df71ec4bfca0",
+    "bytes": 54867,
+    "sha256": "e37430a464b08adedeaf8eea88b9ff00839c617806664633eaf2c0bea618259f",
     "tools": [
       "list_tables",
       "query_data",
@@ -921,8 +921,8 @@
     ]
   },
   "skills+shared+voice+escalations": {
-    "bytes": 62560,
-    "sha256": "ca57b486a33ad1b0000b4376d53a0064fdc457d39db0db232bafe9c7429b37f8",
+    "bytes": 65673,
+    "sha256": "2e699272b083f5f1ba22cff37ddf1488d1b222de4d633624e84eb93517a72b22",
     "tools": [
       "list_tables",
       "query_data",
@@ -979,8 +979,8 @@
     ]
   },
   "skills+shared+voice+escalations+x": {
-    "bytes": 66399,
-    "sha256": "2e74581168c148752b6868a1a6a867d6bc6565eb19cfbf0e0ab4750247a9e830",
+    "bytes": 69512,
+    "sha256": "69f3c56716810cc43a26b40743fb31c000c1adf5694448ccb3396f378e66f7aa",
     "tools": [
       "list_tables",
       "query_data",
@@ -1041,8 +1041,8 @@
     ]
   },
   "skills+shared+voice+escalations+x+team": {
-    "bytes": 67031,
-    "sha256": "11a74db0c69f231adf07e342c12f71baf70f53a7735c1a510a887f125927def1",
+    "bytes": 70144,
+    "sha256": "6ec5b09a11f93de4feb2aa5143baab87c0552aac3cee5f93aadf1948c27e5c81",
     "tools": [
       "list_tables",
       "query_data",
@@ -1104,8 +1104,8 @@
     ]
   },
   "default+legacy-switches": {
-    "bytes": 56030,
-    "sha256": "277330b3463508a9839dedd0dd99533fee12dd87441d0c344f0dd4d839b7e005",
+    "bytes": 59143,
+    "sha256": "563e77a638d5ed6cc4a748b3d7245926d461958aa1c4e3fc2875e16e62b83410",
     "tools": [
       "list_tables",
       "query_data",
@@ -1156,8 +1156,8 @@
     ]
   },
   "default+mausbot": {
-    "bytes": 56681,
-    "sha256": "1612054aaa6e02ee99e882b4e73a0261d6f6e6a97525a95af1a5c0969147e324",
+    "bytes": 59794,
+    "sha256": "3bd92a7cbf3e03fe9e18b9278a7200bb3cc1aa65bb7d00587ff46aff291c1523",
     "tools": [
       "list_tables",
       "query_data",
@@ -1210,8 +1210,8 @@
     ]
   },
   "skills+shared+voice+mausbot": {
-    "bytes": 62381,
-    "sha256": "f649b8271cda9d3ca42e9a4ec77204cc17b76015b2df338a9df4e1c9d0a7b354",
+    "bytes": 65494,
+    "sha256": "3de0bb4192b0e9ca48b286b50b46f923bfca4a88d72ff7f0b4b53888ad2756a0",
     "tools": [
       "list_tables",
       "query_data",
@@ -1269,8 +1269,8 @@
     ]
   },
   "default+handoff": {
-    "bytes": 54818,
-    "sha256": "b0110b0824bf7ebbd2332e690e4a20406068dfcb9869e865e313a0520b22f925",
+    "bytes": 57931,
+    "sha256": "1a82e6fb87336878356afcaed207c12f2210d914beea8c55168ac4c4cdfc398f",
     "tools": [
       "list_tables",
       "query_data",
