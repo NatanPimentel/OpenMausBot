@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { newEventId, newId, TurnNotStartedError, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "./contracts.ts";
+import { seenWithin } from "./thread-presence.ts";
 
 const MB = 1024 * 1024;
 const PAGE_BYTES = 4096;
@@ -78,6 +79,23 @@ export const memoryWaitText = (count: number) => `Waiting for memory: ${running(
   + "This one starts by itself when there is room.";
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
 export const memoryStallText = (cause: string, count: number) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
+// imobiturbo-mod-engine-limit: at most OMB_ENGINE_MAX_ACTIVE turns at once, counting every running one; a turn in a conversation
+// a person had in front of them in the last half hour never waits for that limit, only for memory.
+export const slotWaitText = (count: number, max: number) => `Waiting for a free slot: ${tasks(count)} already running on this computer, which runs at most ${max} at once. This one starts by itself when one finishes.`;
+export const slotStillWaitingText = (count: number) => `Still waiting for a free slot: ${tasks(count)} running on this computer.`;
+const PERSON_WATCHING_MS = 30 * 60_000;
+
+/** OMB_ENGINE_MAX_ACTIVE as a whole number above zero; null when unset or anything else. */
+export function engineMaxActive(vars: Record<string, string | undefined> = process.env): number | null {
+  const raw = vars.OMB_ENGINE_MAX_ACTIVE?.trim();
+  const value = raw ? Number(raw) : NaN;
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** OMB_ENGINE_PRIORITY_BOTS: bot ids, comma separated, whose turns never wait for the limit (the ones talking to customers). */
+export function enginePriorityBots(vars: Record<string, string | undefined> = process.env): ReadonlySet<string> {
+  return new Set((vars.OMB_ENGINE_PRIORITY_BOTS ?? "").split(",").map((id) => id.trim()).filter(Boolean));
+}
 
 /** The bots' browsers, which start during a turn rather than with its engine. */
 export interface EngineBrowsers {
@@ -89,7 +107,7 @@ export interface EngineBrowsers {
 
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
 interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
-interface Waiter { wake: () => void }
+interface Waiter { wake: () => void; threadId: string }
 
 export interface EngineMemoryOptions {
   enabled: boolean;
@@ -99,6 +117,12 @@ export interface EngineMemoryOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   log?: (line: string) => void;
   tickMs?: number;
+  /** Most turns running at once (imobiturbo-mod-engine-limit); null for no limit but memory. */
+  maxActive?: number | null;
+  /** Whether a person has this conversation in front of them: its turns skip the limit. */
+  watched?: (threadId: string) => boolean;
+  /** Bots whose turns skip the limit. */
+  priorityBots?: ReadonlySet<string>;
 }
 
 export class EngineMemory {
@@ -109,6 +133,11 @@ export class EngineMemory {
   private readonly signal: (pid: number, signal: NodeJS.Signals) => void;
   private readonly log: (line: string) => void;
   private readonly tickMs: number;
+  private readonly maxActive: number | null;
+  private readonly watched: (threadId: string) => boolean;
+  private readonly priorityBots: ReadonlySet<string>;
+  /** Threads of a priority bot with a turn on its way: they skip the limit. */
+  private readonly priorityThreads = new Set<string>();
   private readonly context = new AsyncLocalStorage<string>();
   private readonly engines = new Map<number, Engine>();
   private readonly active = new Set<string>();
@@ -132,6 +161,9 @@ export class EngineMemory {
     this.signal = options.signal ?? ((pid, signal) => process.kill(-pid, signal));
     this.log = options.log ?? ((line) => console.warn(`memory: ${line}`));
     this.tickMs = options.tickMs ?? TICK_MS;
+    this.maxActive = options.maxActive ?? null;
+    this.watched = options.watched ?? ((threadId) => seenWithin(threadId, PERSON_WATCHING_MS));
+    this.priorityBots = options.priorityBots ?? new Set();
   }
 
   useBrowsers(browsers: EngineBrowsers): void { this.browsers = browsers; }
@@ -163,6 +195,11 @@ export class EngineMemory {
 
   turnStarted(threadId: string): void { if (this.enabled) this.active.add(threadId); }
 
+  /** A turn of this bot on this thread is on its way: a priority bot's skips the limit. */
+  turnFor(threadId: string, botId: string | undefined): void {
+    if (botId !== undefined && this.priorityBots.has(botId)) this.priorityThreads.add(threadId);
+  }
+
   /** This thread's engine process is still running (an engine keeps one between turns), so its turn starts no new one. */
   hasEngine(threadId: string): boolean {
     for (const engine of this.engines.values()) if (engine.threads.has(threadId) && !engine.stopping) return true;
@@ -172,6 +209,7 @@ export class EngineMemory {
   turnEnded(threadId: string): void {
     if (!this.enabled) return;
     this.active.delete(threadId);
+    this.priorityThreads.delete(threadId);
     this.reserved.delete(threadId);
     this.pressure.delete(threadId);
     this.stops.delete(threadId);
@@ -204,13 +242,13 @@ export class EngineMemory {
     joining?: number): Promise<boolean> {
     if (!this.enabled) return true;
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
-    const waiter: Waiter = { wake: () => {} };
+    const waiter: Waiter = { wake: () => {}, threadId };
     this.queue.push(waiter);
     let announced: number | null = null;
     try {
       for (;;) {
         if (abort.aborted) return false;
-        if (this.queue[0] === waiter) {
+        if (this.myTurn(waiter)) {
           const room = this.room(start, threadId);
           if (room === "admit") {
             this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
@@ -221,7 +259,10 @@ export class EngineMemory {
         }
         if (announced === null || this.now() - announced >= NOTICE_REPEAT_MS) {
           const others = this.othersBusy(threadId);
-          notify(announced === null ? memoryWaitText(others) : memoryStillWaitingText(others));
+          const slot = this.slotFull(threadId);
+          if (slot && announced === null) this.log(`thread ${threadId} waits for a slot; ${tasks(others)} running, at most ${this.maxActive}`);
+          notify(slot ? (announced === null ? slotWaitText(others, this.maxActive!) : slotStillWaitingText(others))
+            : announced === null ? memoryWaitText(others) : memoryStillWaitingText(others));
           announced = this.now();
         }
         await new Promise<void>((resolve) => {
@@ -296,7 +337,23 @@ export class EngineMemory {
       .sort((a, b) => a.startedAt - b.startedAt)[0] ?? null;
   }
 
+  /** This thread's turn may start only when the limit has room, unless a person is watching it. */
+  private slotFull(threadId: string): boolean {
+    return this.maxActive !== null && !this.priorityThreads.has(threadId) && !this.watched(threadId)
+      && this.othersBusy(threadId) >= this.maxActive;
+  }
+
+  /** First in line, or behind only turns held by the limit (a watched turn passes them): memory stays first come, first served. */
+  private myTurn(waiter: Waiter): boolean {
+    for (const ahead of this.queue) {
+      if (ahead === waiter) return true;
+      if (!this.slotFull(ahead.threadId)) return false;
+    }
+    return false;
+  }
+
   private room(start: "process" | "session", threadId: string): "admit" | "wait" | Engine {
+    if (this.slotFull(threadId)) return "wait";
     const memory = this.read();
     if (!memory) return "admit";
     const groups = this.groups(), at = this.now();
@@ -363,7 +420,13 @@ export class EngineMemory {
   }
 }
 
-export const engineMemory = new EngineMemory({ enabled: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team") && process.platform === "linux" });
+const ENGINE_MAX_ACTIVE = engineMaxActive();
+export const engineMemory = new EngineMemory({
+  enabled: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team" || ENGINE_MAX_ACTIVE !== null)
+    && process.platform === "linux",
+  maxActive: ENGINE_MAX_ACTIVE,
+  priorityBots: enginePriorityBots(),
+});
 
 /**
  * One engine's adapter on a Cloud home: a turn that needs a new engine process waits for memory first (saying so in the
@@ -419,6 +482,7 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
         }
       };
       const driverAdmits = adapter.capabilities.engineAdmission === true;
+      memory.turnFor(threadId, input.botId);
       if (!driverAdmits && !memory.hasEngine(threadId)) await admit("process");
       memory.turnStarted(threadId);
       try {

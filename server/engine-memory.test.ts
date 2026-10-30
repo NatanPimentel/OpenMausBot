@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopText, memoryWaitText, processGroupBytes, readHostMemory, withEngineMemory,
+  BROWSER_BYTES, EngineMemory, engineMaxActive, enginePriorityBots, memoryStallText, memoryStillWaitingText, memoryStopText, memoryWaitText, processGroupBytes, readHostMemory, slotWaitText, withEngineMemory,
   type HostMemory,
 } from "./engine-memory.ts";
 import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
@@ -531,4 +531,61 @@ describe("engines that run several threads' sessions", () => {
 
 it("words a stall the same way the Cloud's health report classifies it", () => {
   expect(memoryStallText("no activity for 20 minutes — the turn was stopped", 1)).toMatch(/ran out of memory while 1 task ran at once/);
+});
+
+// imobiturbo-mod-engine-limit
+describe("a limit on turns running at once", () => {
+  const roomy = (): HostMemory => ({ totalBytes: 32 * GB, availableBytes: 20 * GB, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 });
+  const gate = (options: { maxActive: number; watched?: (threadId: string) => boolean; priorityBots?: ReadonlySet<string>; logs?: string[] }) =>
+    new EngineMemory({ enabled: true, tickMs: 5, read: roomy, groups: () => new Map(), log: (line) => options.logs?.push(line),
+      maxActive: options.maxActive, watched: options.watched ?? (() => false), priorityBots: options.priorityBots });
+  const start = async (memory: EngineMemory, threadId: string) => {
+    expect(await memory.admit(threadId, new AbortController().signal, () => {})).toBe(true);
+    memory.turnStarted(threadId);
+  };
+
+  it("holds the turn past the limit, with memory to spare, until one finishes", async () => {
+    const logs: string[] = [];
+    const memory = gate({ maxActive: 2, logs });
+    await start(memory, "a");
+    await start(memory, "b");
+    const notices: string[] = [];
+    const third = memory.admit("c", new AbortController().signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toEqual([slotWaitText(2, 2)]);
+    expect(logs).toEqual(["thread c waits for a slot; 2 tasks running, at most 2"]);
+    memory.turnEnded("a");
+    expect(await third).toBe(true);
+  });
+
+  it("lets a conversation a person is watching start at once, ahead of the turns the limit holds", async () => {
+    const memory = gate({ maxActive: 1, watched: (threadId) => threadId === "w" });
+    await start(memory, "a");
+    const stop = new AbortController();
+    const held = memory.admit("c", stop.signal, () => {});
+    await settle();
+    expect(await memory.admit("w", new AbortController().signal, () => { throw new Error("no wait"); })).toBe(true);
+    stop.abort();
+    expect(await held).toBe(false);
+  });
+
+  it("lets a priority bot's turn start at once", async () => {
+    const memory = gate({ maxActive: 1, priorityBots: new Set(["ross"]) });
+    await start(memory, "a");
+    memory.turnFor("r", "ross");
+    expect(await memory.admit("r", new AbortController().signal, () => { throw new Error("no wait"); })).toBe(true);
+    memory.turnFor("x", "elon");
+    const stop = new AbortController();
+    const held = memory.admit("x", stop.signal, () => {});
+    await settle();
+    stop.abort();
+    expect(await held).toBe(false);
+  });
+
+  it("reads the limit and the priority bots from the environment", () => {
+    expect(engineMaxActive({ OMB_ENGINE_MAX_ACTIVE: " 6 " })).toBe(6);
+    for (const raw of [undefined, "", "0", "-2", "2.5", "six"]) expect(engineMaxActive({ OMB_ENGINE_MAX_ACTIVE: raw })).toBeNull();
+    expect([...enginePriorityBots({ OMB_ENGINE_PRIORITY_BOTS: "a, b,,c " })]).toEqual(["a", "b", "c"]);
+    expect(enginePriorityBots({}).size).toBe(0);
+  });
 });
