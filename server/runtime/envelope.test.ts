@@ -106,6 +106,42 @@ describe("composeEnvelope: assignment with person lineage", () => {
   });
 });
 
+describe("composeEnvelope: person lineage past the first hop or on a one-way handoff (imobiturbo-mod envelope-origem)", () => {
+  const request = "quero clonar este video https://www.instagram.com/p/De-zj9QxrqA/";
+  const first = "Your task is the brief below from @Tux; the request quoted next only started this chain of work and may be about something else.";
+  const notice = assignment({
+    id: "as_tux", depth: 2, parentId: "as_mid", mode: "notify", reply: "none",
+    origin: { kind: "person", source: "chat", ref: "th_1", quote: request },
+    requester: { kind: "bot_turn", botId: "tux", threadId: "th_tux", chief: false },
+    brief: "Aviso do Tux: a API do Gemini parou.",
+  });
+  const tux = { ...names, requester: "Tux" };
+
+  it("puts the requester's brief before a root request two hops up (a teammate's notice)", () => {
+    const text = composeEnvelope(notice, tux);
+    expect(text).toContain(`${first} Milind asked: "${request}". This is your task, sent on Milind's behalf: do it with your own tools and permissions.`);
+    expect(text.indexOf(first)).toBeLessThan(text.indexOf("Milind asked:"));
+    expect(text.endsWith("\n\nBrief from @Tux:\nAviso do Tux: a API do Gemini parou.")).toBe(true);
+  });
+
+  it("does the same on a first-hop one-way handoff and on resumed work two hops down", () => {
+    expect(composeEnvelope(assignment({ ...notice, depth: 1, parentId: "as_root" }), tux)).toContain(first);
+    expect(composeEnvelope(assignment({ ...notice, mode: "work", reply: "resume" }), tux)).toContain(first);
+  });
+
+  it("leaves first-hop resumed work, a root assignment and an empty quote as upstream words them", () => {
+    expect(composeEnvelope(base, names)).not.toContain("Your task is the brief below");
+    expect(composeEnvelope(assignment({ parentId: undefined, depth: 0, mode: "notify", reply: "none" }), names)).not.toContain("Your task is the brief below");
+    const empty = composeEnvelope(assignment({ ...notice, origin: { kind: "person", source: "chat", ref: "th_1", quote: "" } }), tux);
+    expect(empty).not.toContain("Your task is the brief below");
+    expect(empty).toContain("Milind's own request started this work. This is your task");
+  });
+
+  it("keeps a one-way handoff's harness part under 1000 characters", () => {
+    expect(opening(composeEnvelope(assignment({ mode: "notify", reply: "none" }), names)).length).toBeLessThan(1000);
+  });
+});
+
 describe("composeEnvelope: assignment with routine lineage", () => {
   const routine = assignment({ origin: { kind: "routine", source: "routine", ref: "rt_1" }, level: "edits", levelSource: "engine_cap" });
   const envelope = composeEnvelope(routine, { ...names, thread: "Nightly digest" });
