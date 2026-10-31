@@ -63,9 +63,9 @@ function profiles(): Record<string, Record<string, string>> {
   all["skills+shared+voice+escalations"] = { ...all["skills+shared+voice"]!, OMB_ESCALATIONS: "1" };
   all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1" };
   all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
-  all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" };
+  all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" };
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
-  all["default+handoff"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
+  all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
   return all;
 }
@@ -81,33 +81,33 @@ const FULL = "skills+shared+voice+escalations+x+team";
  * either: lock a saving in by lowering the number. A Chief's list is longer
  * than another bot's only by the Chief-only names in find_tool's description. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 16614,
-  "voice": 17395,
-  "shared": 16654,
-  "shared+voice": 17435,
-  "skills": 16641,
-  "skills+voice": 17422,
-  "skills+shared": 16681,
+  "default": 16952,
+  "voice": 17733,
+  "shared": 16992,
+  "shared+voice": 17773,
+  "skills": 16979,
+  "skills+voice": 17760,
+  "skills+shared": 17019,
   "skills+shared+voice": 17462,
-  "non-chief": 16497,
-  "voice+non-chief": 17278,
-  "shared+non-chief": 16537,
-  "shared+voice+non-chief": 17318,
-  "skills+non-chief": 16524,
-  "skills+voice+non-chief": 17305,
-  "skills+shared+non-chief": 16564,
-  "skills+shared+voice+non-chief": 17345,
-  "skills+shared+voice+cloud-home": 17460,
-  "skills+shared+voice+non-chief+cloud-home": 17343,
+  "non-chief": 16835,
+  "voice+non-chief": 17616,
+  "shared+non-chief": 16875,
+  "shared+voice+non-chief": 17656,
+  "skills+non-chief": 16862,
+  "skills+voice+non-chief": 17643,
+  "skills+shared+non-chief": 16902,
+  "skills+shared+voice+non-chief": 17683,
+  "skills+shared+voice+cloud-home": 17816,
+  "skills+shared+voice+non-chief+cloud-home": 17681,
   "skills+shared+voice+escalations": 17480,
   "skills+shared+voice+escalations+x": 17541,
   "skills+shared+voice+escalations+x+team": 17557,
-  "default+legacy-switches": 16614,
-  "default+mausbot": 16666,
+  "default+legacy-switches": 16952,
+  "default+mausbot": 17004,
   "skills+shared+voice+mausbot": 17514,
-  "default+handoff": 15402,
-  "default+room": 15378,
-  "non-chief+room": 15261,
+  "default+no-computer-pick": 15169,
+  "default+room": 15679,
+  "non-chief+room": 15562,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
