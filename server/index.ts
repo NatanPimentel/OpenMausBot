@@ -50,6 +50,7 @@ import { isPendingSignInRequest, normalizeSignInSite, signInOutcome, signInResum
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
+import { ROOM_MEMBER_PARALLEL, roomMemberAvailability, roomMemberBusy } from "./room-member-busy.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
@@ -4248,12 +4249,12 @@ function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: strin
 type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
 type GroupMemberBotWaitResult = Exclude<GroupMemberBotAvailability, "busy">;
 
+const roomMemberBusyInput = (bot: BotRecord) => ({ botId: bot.id, botBusy: bot.busy === true, speakers: groupSpeakers, busyThreads: store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId)).length, maxThreads: maxConcurrentBotThreads(cfg), parallel: ROOM_MEMBER_PARALLEL }); // local mod, room-member-busy.ts
 function groupMemberBotAvailability(botId: string, operation: GroupTurnOperation): GroupMemberBotAvailability {
   if (operation.cancelled || operation.cancellation.signal.aborted) return "cancelled";
   const bot = store.bot(botId);
   if (!bot || bot.hidden) return "unavailable";
-  if (bot.busy || roomMemberLock.heldElsewhere(botId, operation.threadId)) return "busy";
-  return "ready";
+  return roomMemberAvailability({ ...roomMemberBusyInput(bot), threadId: operation.threadId, lock: roomMemberLock });
 }
 
 /** One synchronous step, so threads woken by the same release cannot all read the member as free. */
@@ -9905,7 +9906,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   // One turn per bot across 1:1 and rooms: the last-line guard for a 1:1 that re-claimed the bot after the member wait settled.
-  if (bot.busy) {
+  if (roomMemberBusy(roomMemberBusyInput(bot))) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;
@@ -10122,7 +10123,7 @@ async function runClaimedGroupMemberTurn(
     reportDispatchError(message);
     return true;
   }
-  if (readyBot.busy) {
+  if (roomMemberBusy(roomMemberBusyInput(readyBot))) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;

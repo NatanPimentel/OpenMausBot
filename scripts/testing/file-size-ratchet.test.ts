@@ -16,7 +16,7 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15901,
+  "server/index.ts": 15902, // local mod room-member-parallel: +1 line, the rule lives in server/room-member-busy.ts
   "src/state/store.tsx": 3381,
   "electron/main.mjs": 3246,
   "server/store.ts": 2323,
