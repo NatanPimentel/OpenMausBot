@@ -155,7 +155,8 @@ describe("a teammate's NEEDS INPUT question", () => {
     const card = world({ inboxThread: "inbox" });
     card.cards.park(card.node({ cards: ["m9"] }), "Waiting on the person: connect Gmail");
     expect(card.rows("inbox").map((row) => row.tool?.name)).toEqual(["Ledger needs your input: Waiting on the person: connect Gmail"]);
-    expect(card.notified.map((notification) => notification.kind)).toEqual(["delegation-settled"]);
+    // Local mod (29/10/2026): a parked teammate's wait notifies as a question, never "resumed with results".
+    expect(card.notified.map((notification) => notification.kind)).toEqual(["question"]);
   });
 });
 
