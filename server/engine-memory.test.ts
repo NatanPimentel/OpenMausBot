@@ -573,6 +573,7 @@ describe("a limit on turns running at once", () => {
     const third = memory.admit("c", new AbortController().signal, (text) => notices.push(text));
     await settle();
     expect(notices).toEqual([slotWaitText(2, 2)]);
+    expect(notices[0]).toBe("Esperando uma vaga: 2 conversas já rodam neste computador, que roda no máximo 2 ao mesmo tempo. Esta começa sozinha quando uma terminar.");
     expect(logs).toEqual(["thread c waits for a slot; 2 tasks running, at most 2"]);
     memory.turnEnded("a");
     expect(await third).toBe(true);

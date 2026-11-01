@@ -87,8 +87,10 @@ export const memoryStillWaitingText = (count: number) => `Still waiting for memo
 export const memoryStallText = (cause: string, count: number) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
 // imobiturbo-mod-engine-limit: at most OMB_ENGINE_MAX_ACTIVE turns at once, counting every running one; a turn in a conversation
 // a person had in front of them in the last half hour never waits for that limit, only for memory.
-export const slotWaitText = (count: number, max: number) => `Waiting for a free slot: ${tasks(count)} already running on this computer, which runs at most ${max} at once. This one starts by itself when one finishes.`;
-export const slotStillWaitingText = (count: number) => `Still waiting for a free slot: ${tasks(count)} running on this computer.`;
+// The fleet reads these in Portuguese (pt-br PC); the line lands in group chats the person reads.
+const conversas = (count: number) => `${count} ${count === 1 ? "conversa" : "conversas"}`;
+export const slotWaitText = (count: number, max: number) => `Esperando uma vaga: ${conversas(count)} já ${count === 1 ? "roda" : "rodam"} neste computador, que roda no máximo ${max} ao mesmo tempo. Esta começa sozinha quando uma terminar.`;
+export const slotStillWaitingText = (count: number) => `Ainda esperando uma vaga: ${conversas(count)} rodando neste computador.`;
 const PERSON_WATCHING_MS = 30 * 60_000;
 
 /** OMB_ENGINE_MAX_ACTIVE as a whole number above zero; null when unset or anything else. */
