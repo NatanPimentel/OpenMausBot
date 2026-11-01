@@ -25,15 +25,17 @@ export function questionCardText(card: AskCard | null | undefined): string | und
   return question ? card.subtitle?.trim() || undefined : undefined;
 }
 
-/** The question a reply ends with on a `NEEDS INPUT:` line, or undefined when it asks nothing. */
+/** The question a reply ends with on a `NEEDS INPUT:` line, or the line before a closing `Default:` line (upstream
+ * v0.1.136); undefined when it asks nothing. */
 export function needsInputQuestion(text: string): string | undefined {
   const lines = text.split(/\r?\n/);
-  let last = lines.length - 1;
-  while (last >= 0 && lines[last]!.trim() === "") last -= 1;
+  const filled = (from: number) => { let at = from; while (at >= 0 && lines[at]!.trim() === "") at -= 1; return at; };
+  const last = filled(lines.length - 1);
   if (last < 0) return undefined;
-  const line = lines[last]!.trim();
+  const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
+  const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
+  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
   // Local patch: "NEEDS INPUT: nenhum." is a bot saying it needs nothing, not a question.
   if (NEEDS_INPUT_NONE.test(question) && !question.includes("?")) return undefined;
   return question || undefined;
